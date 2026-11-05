@@ -564,6 +564,61 @@ class WorkflowTest {
         assertTrue(clicks.filter { it.accented }.all { it.frame % (framesPerBeat * 4) == 0L })
     }
 
+    @Test fun playingFromTheMiddleReportsAbsoluteMusicalTime() {
+        // Frame zero of a schedule is the start of playback, not of the piece. If the
+        // conversions did not account for that, playing or looping from bar three would
+        // report a playhead three bars behind where the music actually is.
+        var composition = Composition.newGuitarProject(bpm = 120.0)
+        for (beat in 0 until 32) {
+            composition = CompositionEditor.addNoteAt(
+                composition, 1L, 0, 0, beat * Ticks.QUARTER.toLong(), Ticks.QUARTER,
+            )
+        }
+        val sampleRate = 48_000
+        val fromTick = 3L * TimeSignature.FOUR_FOUR.barTicks     // bar four
+        val schedule = com.tabtap.app.audio.Sequencer.build(
+            composition, sampleRate, fromTick = fromTick,
+        )
+
+        // The first frame of playback is the tick we asked to start at.
+        assertEquals(fromTick, schedule.tickAtFrame(0L))
+        // And the conversions are inverses of each other.
+        assertEquals(0L, schedule.frameAtTick(fromTick))
+        for (bars in 0..4) {
+            val tick = fromTick + bars * TimeSignature.FOUR_FOUR.barTicks
+            val frame = schedule.frameAtTick(tick)
+            assertEquals("round trip at bar $bars", tick, schedule.tickAtFrame(frame))
+        }
+        // A bar at 120 BPM is two seconds, which is 96000 frames.
+        assertEquals(96_000L, schedule.frameAtTick(fromTick + TimeSignature.FOUR_FOUR.barTicks))
+
+        // The first scheduled note is the one at the start tick, placed at frame zero.
+        val firstNote = schedule.events
+            .filterIsInstance<com.tabtap.app.audio.ScheduledEvent.NoteOn>().first()
+        assertEquals(0L, firstNote.frame)
+        // And nothing before the start tick was scheduled.
+        assertEquals(
+            32 - 12,
+            schedule.events.filterIsInstance<com.tabtap.app.audio.ScheduledEvent.NoteOn>().size,
+        )
+    }
+
+    @Test fun loopingFromTheMiddleUsesTheRightFrames() {
+        var composition = Composition.newGuitarProject(bpm = 120.0)
+        for (beat in 0 until 16) {
+            composition = CompositionEditor.addNoteAt(
+                composition, 1L, 0, 0, beat * Ticks.QUARTER.toLong(), Ticks.QUARTER,
+            )
+        }
+        val bar = TimeSignature.FOUR_FOUR.barTicks.toLong()
+        val schedule = com.tabtap.app.audio.Sequencer.build(
+            composition, 48_000, fromTick = bar, toTick = bar * 2,
+        )
+        // A loop over bar two starts at frame zero of this schedule and is one bar long.
+        assertEquals(0L, schedule.frameAtTick(bar))
+        assertEquals(96_000L, schedule.frameAtTick(bar * 2))
+    }
+
     @Test fun countInDelaysTheMusicWithoutShiftingItRelativeToTheClick() {
         var composition = Composition.newGuitarProject(bpm = 120.0)
         composition = CompositionEditor.addNoteAt(composition, 1L, 0, 0, 0L, Ticks.QUARTER)
@@ -578,5 +633,7 @@ class WorkflowTest {
         assertEquals(schedule.countInFrames, firstNote.frame)
         // The tick at that frame is zero: the count-in does not shift musical time.
         assertEquals(0L, schedule.tickAtFrame(firstNote.frame))
+        // And before the count-in ends, musical time has not started.
+        assertEquals(0L, schedule.tickAtFrame(0L))
     }
 }

@@ -61,23 +61,35 @@ class Schedule(
     /** One bus per track, in the same order as [Composition.tracks]. */
     val busVoices: List<InstrumentVoice>,
     val trackIds: List<Long>,
+    /**
+     * The musical tick this schedule begins at.
+     *
+     * Frame zero of a schedule is the start of *playback*, not the start of the piece, so
+     * both conversions below have to offset by this. Without it, playing or looping from
+     * the middle of a composition would report a playhead that is wrong by however far in
+     * playback started — and the loop boundaries would be computed in the wrong place.
+     */
+    val fromTick: Long = 0L,
 ) {
     /** Musical tick at a frame position, accounting for the count-in and tempo changes. */
     fun tickAtFrame(frame: Long): Long {
         val musicalFrame = frame - countInFrames
-        if (musicalFrame <= 0) return 0L
-        return tempoMap.tickAtSeconds(musicalFrame.toDouble() / sampleRate)
+        if (musicalFrame <= 0) return fromTick
+        val secondsIntoPlayback = musicalFrame.toDouble() / sampleRate
+        return tempoMap.tickAtSeconds(tempoMap.secondsAt(fromTick) + secondsIntoPlayback)
     }
 
-    /** Frame position of a musical tick. */
-    fun frameAtTick(tick: Long): Long =
-        countInFrames + (tempoMap.secondsAt(tick) * sampleRate).roundToLong()
+    /** Frame position of a musical tick within this schedule. */
+    fun frameAtTick(tick: Long): Long {
+        val seconds = tempoMap.secondsAt(tick) - tempoMap.secondsAt(fromTick)
+        return countInFrames + (seconds * sampleRate).roundToLong().coerceAtLeast(0L)
+    }
 
     val isEmpty: Boolean get() = events.isEmpty()
 
     companion object {
         val EMPTY = Schedule(
-            emptyList(), 0L, 48_000, TempoMap.of(120.0), 0L, 0, emptyList(), emptyList(),
+            emptyList(), 0L, 48_000, TempoMap.of(120.0), 0L, 0, emptyList(), emptyList(), 0L,
         )
     }
 }
@@ -189,6 +201,7 @@ object Sequencer {
             countInPulses = countInBars * ts.pulsesPerBar,
             busVoices = busVoices,
             trackIds = trackIds,
+            fromTick = fromTick,
         )
     }
 

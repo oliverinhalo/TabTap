@@ -82,6 +82,18 @@ class AudioEngine {
     private var nextEventIndex = 0
 
     private val playFrame = AtomicLong(0L)
+
+    /**
+     * A monotonic frame counter that advances on every rendered block whatever the
+     * transport is doing.
+     *
+     * Previews — a fretboard tap, a chord audition — are positioned against this rather
+     * than against the transport position, because the transport position does not move
+     * while playback is stopped. Scheduling a preview's note-off against a stationary
+     * clock would mean it never came due, so the note would ring its full decay and the
+     * pending-event queue would grow without bound.
+     */
+    private val deviceFrame = AtomicLong(0L)
     private val transport = MutableStateFlow(TransportState.STOPPED)
     private val position = MutableStateFlow(PlaybackPosition())
 
@@ -343,12 +355,14 @@ class AudioEngine {
         if (!isOpen && !start()) return
         if (pitches.isEmpty()) return
         val keyBase = Sequencer.PREVIEW_KEY_BASE + (previewCounter++ * 16 and 0x0FFFFFF0)
+        val now = deviceFrame.get()
         for (event in Sequencer.previewEvents(
             pitches, InstrumentVoice.ELECTRIC_CLEAN, sampleRate, velocity, durationSeconds, keyBase,
         )) {
             immediateEvents += when (event) {
-                is ScheduledEvent.NoteOn -> event.copy(frame = currentFrame())
-                is ScheduledEvent.NoteOff -> event.copy(frame = currentFrame() + event.frame)
+                is ScheduledEvent.NoteOn -> event.copy(frame = now)
+                // previewEvents gives the note-off's frame as an offset from the start.
+                is ScheduledEvent.NoteOff -> event.copy(frame = now + event.frame)
                 else -> event
             }
         }
@@ -357,12 +371,10 @@ class AudioEngine {
     /** Sound a single metronome click immediately, for tap-tempo feedback. */
     fun previewClick(accented: Boolean) {
         if (!isOpen && !start()) return
-        immediateEvents += ScheduledEvent.Click(currentFrame(), accented)
+        immediateEvents += ScheduledEvent.Click(deviceFrame.get(), accented)
     }
 
     private var previewCounter = 0
-
-    private fun currentFrame(): Long = playFrame.get()
 
     // ---------------------------------------------------------------- render thread
 
@@ -406,11 +418,12 @@ class AudioEngine {
 
             val blockStart = playFrame.get()
             val blockEnd = blockStart + frames
+            val deviceBlockStart = deviceFrame.get()
 
             if (playing) {
                 renderScheduled(blockStart, blockEnd, frames)
             }
-            renderImmediate(immediate, blockStart, frames)
+            renderImmediate(immediate, deviceBlockStart, frames)
 
             // Render each bus into the mix.
             for (i in buses.indices) {
@@ -448,6 +461,9 @@ class AudioEngine {
                 running.set(false)
                 break
             }
+
+            // The device clock advances on every block, playing or not.
+            deviceFrame.addAndGet(frames.toLong())
 
             if (playing) {
                 var next = blockEnd
@@ -497,14 +513,19 @@ class AudioEngine {
         }
     }
 
+    /**
+     * Dispatch the one-shot events the interface has queued.
+     *
+     * Anything due in a later block is handed back to the queue; because these are timed
+     * against [deviceFrame], which always advances, they are guaranteed to come due.
+     */
     private fun renderImmediate(events: List<ScheduledEvent>, blockStart: Long, frames: Int) {
         for (event in events) {
-            val offset = (event.frame - blockStart).toInt().coerceIn(0, frames - 1)
-            if (event.frame > blockStart + frames) {
-                // A preview note-off that lands in a later block: hold it over.
+            if (event.frame >= blockStart + frames) {
                 immediateEvents += event
                 continue
             }
+            val offset = (event.frame - blockStart).toInt().coerceIn(0, frames - 1)
             dispatch(event, offset)
         }
     }

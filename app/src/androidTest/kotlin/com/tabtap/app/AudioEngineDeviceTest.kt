@@ -198,6 +198,30 @@ class AudioEngineDeviceTest {
         Thread.sleep(100)
     }
 
+    @Test fun previewsAreReleasedEvenWithTheTransportStopped() {
+        // Previews are timed against a clock that advances whatever the transport is
+        // doing. Against the transport position — which does not move while stopped —
+        // their note-offs would never come due, so the pending queue would grow for
+        // every fretboard tap and notes would ring their full decay.
+        assertTrue(engine.start())
+        assertEquals(TransportState.STOPPED, engine.transportState.value)
+
+        // Far more taps than the voice pool holds, over a short window.
+        repeat(120) { i ->
+            engine.preview(listOf(40 + i % 30), durationSeconds = 0.08f)
+            Thread.sleep(8)
+        }
+        // Give the shortest previews time to have been released and retired.
+        Thread.sleep(800)
+
+        // If the note-offs were never dispatched the engine would still be sounding
+        // every one of those notes; a healthy engine has retired them.
+        engine.preview(listOf(64), durationSeconds = 0.05f)
+        Thread.sleep(400)
+        assertTrue("the engine stopped working after many previews", engine.isOpen)
+        assertEquals(TransportState.STOPPED, engine.transportState.value)
+    }
+
     @Test fun panicSilencesEverythingAndTheEngineStaysUsable() {
         assertTrue(engine.start())
         val composition = composition()

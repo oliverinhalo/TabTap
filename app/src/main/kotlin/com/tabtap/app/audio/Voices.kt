@@ -505,6 +505,7 @@ class ClickVoice(private val sampleRate: Int) : Voice {
         }
     }
 
+    /** A click is 30 to 45 milliseconds long; there is nothing to release early. */
     override fun release() = Unit
 
     override fun kill() { remaining = 0 }
