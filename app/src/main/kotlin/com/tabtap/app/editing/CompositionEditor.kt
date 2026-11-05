@@ -768,19 +768,29 @@ object CompositionEditor {
             composition.chordProgression.map { if (it.id == chordId) it.copy(voicing = voicing) else it },
         )
 
+    /**
+     * Move a chord to a different place in the progression.
+     *
+     * The reordered list is reflowed *before* it goes back into the composition, because
+     * [Composition.withChordProgression] sorts by start tick — passing the reordered but
+     * not-yet-retimed list through it would simply restore the original order.
+     */
     fun moveChord(composition: Composition, chordId: Long, toIndex: Int): Composition {
         val list = composition.chordProgression.toMutableList()
         val from = list.indexOfFirst { it.id == chordId }
         if (from < 0) return composition
         val target = toIndex.coerceIn(0, list.size - 1)
         list.add(target, list.removeAt(from))
-        return reflowChords(composition.withChordProgression(list))
+        return reflowChords(composition.copy(chordProgression = list))
     }
 
     fun clearChords(composition: Composition): Composition =
         composition.withChordProgression(emptyList())
 
-    /** Re-pack the progression so the chords sit end to end with no gaps. */
+    /**
+     * Re-pack the progression so the chords sit end to end with no gaps, keeping the
+     * list's current order rather than re-sorting by the old timings.
+     */
     fun reflowChords(composition: Composition): Composition {
         var tick = 0L
         val reflowed = composition.chordProgression.map { event ->

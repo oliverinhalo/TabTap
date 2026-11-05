@@ -2,6 +2,7 @@ package com.tabtap.app.audio
 
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.sin
@@ -119,7 +120,14 @@ class Biquad {
     }
 }
 
-/** A first-order one-pole low-pass, cheap enough to run per sample inside a string loop. */
+/**
+ * A first-order one-pole low-pass, cheap enough to run per sample inside a string loop.
+ *
+ * [phaseDelaySamples] matters: inside a waveguide loop this filter contributes real
+ * delay, and at the cutoffs a plucked string uses that delay is several samples, not a
+ * fraction of one. Ignoring it detunes the note — the string's period is the delay line
+ * *plus* the filter — so the string voice subtracts it when sizing the delay line.
+ */
 class OnePole(private var coefficient: Float = 0.5f) {
     private var state = 0f
 
@@ -139,6 +147,20 @@ class OnePole(private var coefficient: Float = 0.5f) {
     fun process(x: Float): Float {
         state = (1f - coefficient) * x + coefficient * state
         return state
+    }
+
+    /**
+     * Phase delay in samples at angular frequency [omega] (radians per sample).
+     *
+     * For H(z) = (1-c)/(1 - c z^-1) the phase is -atan(c sin w / (1 - c cos w)), and the
+     * phase delay is that divided by w. At DC this tends to c/(1-c), which for a dark
+     * filter is many samples.
+     */
+    fun phaseDelaySamples(omega: Double): Double {
+        if (omega <= 1e-12) return (coefficient / (1.0 - coefficient)).coerceAtMost(1000.0)
+        val c = coefficient.toDouble()
+        val phase = atan2(c * sin(omega), 1.0 - c * cos(omega))
+        return phase / omega
     }
 }
 
@@ -173,8 +195,14 @@ class AllPass {
 /** Waveshaping curves for the amplifier stages. */
 object Shapers {
 
-    /** A smooth, valve-like saturation. */
-    fun soft(x: Float, drive: Float): Float = tanh(x * drive) / tanh(drive)
+    /**
+     * A smooth, valve-like saturation, bounded to +/-1 for any input.
+     *
+     * The output is deliberately *not* normalised to unity at x == 1: dividing by
+     * tanh(drive) would push large inputs past full scale, and make-up gain belongs to
+     * the track's output trim where it can be set per instrument.
+     */
+    fun soft(x: Float, drive: Float): Float = tanh(x * drive)
 
     /**
      * An asymmetric clip, which generates even harmonics as a real valve stage does and

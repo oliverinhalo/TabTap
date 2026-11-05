@@ -143,13 +143,15 @@ class StringVoice(private val sampleRate: Int) : Voice {
         dead = articulation.dead
 
         ensureCapacity(basePeriodSamples.toInt() + 4)
-        setPeriod(periodSamples)
 
         // Decay: low strings ring far longer than high ones, and the loop filter's
         // cutoff tracks the fundamental so the harmonic decay is frequency dependent.
+        // This is set *before* the delay line is sized, because the filter's own delay
+        // is part of the loop and has to be subtracted from it.
         val brightness = articulation.brightness.coerceIn(0f, 1f)
         val cutoff = (f * (3f + 9f * brightness)).coerceIn(400f, sampleRate * 0.45f)
         loopFilter.setCutoff(sampleRate, cutoff)
+        setPeriod(periodSamples)
 
         // Energy loss per round trip. A dead note loses almost everything immediately.
         val damping = articulation.damping.coerceIn(0f, 1f)
@@ -262,10 +264,18 @@ class StringVoice(private val sampleRate: Int) : Voice {
         }
     }
 
+    /**
+     * Size the delay line for a period of [period] samples.
+     *
+     * The sounding period is the delay line *plus* everything else in the loop, and the
+     * loop filter's own phase delay at the fundamental is several samples at the cutoffs
+     * a plucked string uses — around twelve for a low E. Subtracting it is what makes the
+     * note land on the right pitch instead of tens of cents flat.
+     */
     private fun setPeriod(period: Float) {
-        // The averaging in the loop filter already contributes about half a sample of
-        // delay, so that is subtracted from the delay line length.
-        val total = (period - 0.5f).coerceAtLeast(2f)
+        val omega = 2.0 * PI / period
+        val filterDelay = loopFilter.phaseDelaySamples(omega)
+        val total = (period - filterDelay).toFloat().coerceAtLeast(2f)
         integerDelay = total.toInt()
         fractionalDelay.setFraction(total - integerDelay)
     }
@@ -303,15 +313,15 @@ class StringVoice(private val sampleRate: Int) : Voice {
             val readIndex = (writeIndex - integerDelay) and mask
             val delayed = buffer[readIndex]
             val tuned = fractionalDelay.process(delayed)
-            var fed = loopFilter.process(tuned) * loopGain
-            if (releasing) {
-                releaseGain *= releaseCoefficient
-                fed *= releaseCoefficient
-            }
+            val fed = loopFilter.process(tuned) * loopGain
             buffer[writeIndex] = fed
             writeIndex = (writeIndex + 1) and mask
 
-            val sample = dcBlocker.process(fed)
+            // The release is an output envelope, not a loop loss. A factor applied
+            // inside the loop only compounds once per round trip — hundreds of samples
+            // for a low string — which would make the release almost inaudible.
+            if (releasing) releaseGain *= releaseCoefficient
+            val sample = dcBlocker.process(fed) * releaseGain
             out[from + i] += sample
             val magnitude = abs(sample)
             if (magnitude > peak) peak = magnitude
@@ -331,8 +341,8 @@ class StringVoice(private val sampleRate: Int) : Voice {
      * Release the note.
      *
      * A fretted note that is lifted does not stop dead, it damps over a few tens of
-     * milliseconds, so the release applies an exponential taper rather than a hard gate.
-     * That is also what prevents the click a hard cut would produce.
+     * milliseconds, so the release applies an exponential taper to the output rather
+     * than a hard gate. That is also what prevents the click a hard cut would produce.
      */
     override fun release() {
         if (!active || releasing) return

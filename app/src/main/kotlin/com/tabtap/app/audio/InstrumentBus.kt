@@ -73,7 +73,7 @@ class InstrumentBus(
                 postLowPass.lowPass(sampleRate, 7500f, 0.8f)
                 shaper = Shaper.SOFT
                 driveAmount = 1.15f
-                outputTrim = 0.95f
+                outputTrim = 1.1f
             }
             InstrumentVoice.ELECTRIC_OVERDRIVE -> {
                 highPass.highPass(sampleRate, 95f)
@@ -127,7 +127,7 @@ class InstrumentBus(
                 postLowPass.lowPass(sampleRate, 3800f, 0.8f)
                 shaper = Shaper.SOFT
                 driveAmount = 1.4f
-                outputTrim = 0.85f
+                outputTrim = 0.95f
             }
             InstrumentVoice.BASS_PICK -> {
                 highPass.highPass(sampleRate, 40f)
@@ -137,7 +137,7 @@ class InstrumentBus(
                 postLowPass.lowPass(sampleRate, 5200f, 0.8f)
                 shaper = Shaper.SOFT
                 driveAmount = 2.0f
-                outputTrim = 0.78f
+                outputTrim = 0.9f
             }
             InstrumentVoice.PIANO -> {
                 highPass.highPass(sampleRate, 30f)
