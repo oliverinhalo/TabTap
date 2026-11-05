@@ -32,6 +32,7 @@ import com.tabtap.music.StrumPattern
 import com.tabtap.music.Ticks
 import com.tabtap.music.TimeSignature
 import com.tabtap.music.Track
+import com.tabtap.music.TrackRole
 import com.tabtap.music.Tuning
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -118,6 +119,19 @@ data class ChordEditorState(
     val isEditing: Boolean get() = editingChordId != null
 }
 
+/**
+ * Which parts you hear, so you can play the other one yourself.
+ *
+ * This is the point of generating a harmony: you want to hear the part you are *not*
+ * playing. Setting a mode is one tap rather than muting tracks by hand.
+ */
+enum class PlayAlongMode(val label: String, val description: String) {
+    EVERYTHING("Everything", "The whole arrangement"),
+    I_PLAY_LEAD("I play the lead", "You hear the harmony and the chords"),
+    I_PLAY_HARMONY("I play the harmony", "You hear the lead and the chords"),
+    CHORDS_ONLY("Just the chords", "A backing to play over"),
+}
+
 /** What the loop covers. */
 enum class LoopScope(val label: String) {
     OFF("Off"),
@@ -143,6 +157,9 @@ data class StudioUiState(
     val countInBars: Int = 1,
     val loop: LoopRegion? = null,
     val loopScope: LoopScope = LoopScope.OFF,
+    val playAlong: PlayAlongMode = PlayAlongMode.EVERYTHING,
+    /** The chord backing is silenced independently of the tracks. */
+    val chordsMuted: Boolean = false,
     val playback: PlaybackPosition = PlaybackPosition(),
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
@@ -168,6 +185,18 @@ data class StudioUiState(
     val isPlaying: Boolean
         get() = playback.state == TransportState.PLAYING || playback.state == TransportState.COUNTING_IN
     val hasSelection: Boolean get() = selectedNoteIds.isNotEmpty()
+
+    /** The track the harmoniser treats as the original line. */
+    val leadTrack: Track?
+        get() = composition.tracks.firstOrNull { it.role == TrackRole.LEAD }
+            ?: composition.tracks.firstOrNull { it.role != TrackRole.HARMONY }
+            ?: composition.tracks.firstOrNull()
+
+    /** The generated harmony parts. */
+    val harmonyTracks: List<Track>
+        get() = composition.tracks.filter { it.role == TrackRole.HARMONY }
+
+    val hasHarmony: Boolean get() = harmonyTracks.isNotEmpty()
 
     /** A short description of the loop's extent, for the transport readout. */
     val loopLabel: String?
@@ -1147,6 +1176,24 @@ class StudioViewModel(
         a.mode == b.mode && a.diatonicSteps == b.diatonicSteps &&
             a.semitones == b.semitones && a.octaveShift == b.octaveShift
 
+    /**
+     * Harmonise the lead line with the staged intervals.
+     *
+     * Deliberately harmonises the *lead* rather than whichever track happens to be
+     * selected: harmonising a harmony is almost never what someone means, and having
+     * tapped a harmony staff to read it should not change what this does.
+     */
+    fun harmoniseLead() {
+        val state = _state.value
+        val lead = state.leadTrack ?: return
+        if (lead.notes.isEmpty()) {
+            emit("Play a line on the fretboard first, then harmonise it")
+            return
+        }
+        setActiveTrack(lead.id)
+        generateHarmonies()
+    }
+
     /** Generate the staged harmony voices from the active track. */
     fun generateHarmonies() {
         val state = _state.value
@@ -1447,6 +1494,7 @@ class StudioViewModel(
             countInBars = countInBars,
             metronome = metronome,
             metronomeLevel = state.metronomeLevel,
+            includeChords = !state.chordsMuted,
         )
         engine.play(schedule, state.loop)
         PlaybackServiceController.start(getApplication())
@@ -1478,6 +1526,54 @@ class StudioViewModel(
     }
 
     /** Apply a loop scope, working out the region from the music and the playhead. */
+    /**
+     * Choose which parts sound.
+     *
+     * Implemented with the tracks' own mute flags rather than a separate playback-only
+     * concept, so what you hear is always exactly what the mixer shows — and switching
+     * mode mid-playback takes effect at the next buffer without stopping anything.
+     */
+    fun setPlayAlong(mode: PlayAlongMode) {
+        val state = _state.value
+        val lead = state.leadTrack
+        val harmonies = state.harmonyTracks.map { it.id }.toSet()
+
+        // The chord backing plays under every mode: it is the thing you want underneath
+        // whichever part you are playing yourself.
+        val chordsMuted = false
+
+        var composition = CompositionEditor.clearSolos(state.composition)
+        composition = composition.copy(
+            tracks = composition.tracks.map { track ->
+                val muted = when (mode) {
+                    PlayAlongMode.EVERYTHING -> false
+                    PlayAlongMode.I_PLAY_LEAD -> track.id == lead?.id
+                    PlayAlongMode.I_PLAY_HARMONY -> track.id in harmonies
+                    PlayAlongMode.CHORDS_ONLY -> true
+                }
+                if (track.muted == muted) track else track.copy(muted = muted)
+            },
+        )
+
+        edits.push(composition, mode.label)
+        _state.value = _state.value.copy(
+            playAlong = mode,
+            chordsMuted = chordsMuted,
+        )
+        publish(composition)
+        engine.setChordsAudible(!chordsMuted)
+
+        if (mode == PlayAlongMode.CHORDS_ONLY && state.composition.chordProgression.isEmpty()) {
+            emit("There are no chords yet — add some on the Chords screen")
+        }
+    }
+
+    /** Silence or restore the chord backing on its own. */
+    fun setChordsMuted(muted: Boolean) {
+        _state.value = _state.value.copy(chordsMuted = muted)
+        engine.setChordsAudible(!muted)
+    }
+
     fun setLoopScope(scope: LoopScope) {
         val state = _state.value
         val ts = state.composition.timeSignature

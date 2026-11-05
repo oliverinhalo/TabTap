@@ -93,10 +93,14 @@ fun TransportBar(
         // the secondary controls are dropped as the width shrinks rather than being
         // allowed to overflow. The play, stop and position controls always survive.
         val width = maxWidth
-        val showBeatLamps = width >= 560.dp
-        val showLoopAndClick = width >= 420.dp
+        // Nothing is ever dropped: controls that will not fit on one row move to a
+        // second. Hiding the loop button on a phone meant the loop could not be reached
+        // at all, which is worse than two rows.
+        val oneRow = width >= 560.dp
+        val showBeatLamps = width >= 460.dp
+        val showLoopAndClick = oneRow
         val showRestart = width >= 380.dp
-        val showUndoRedo = width >= 480.dp
+        val showUndoRedo = oneRow
         // Below this the plus/minus stepper does not fit; the tempo becomes a tappable
         // readout instead, which still reaches tap-tempo and the tempo field.
         val showTempoStepper = width >= 360.dp
@@ -256,6 +260,59 @@ fun TransportBar(
                     IconToggle(
                         Icons.Default.Redo, "Redo", enabled = canRedo, onClick = onRedo,
                     )
+                }
+            }
+
+            // On a narrow screen the loop, click and undo live on their own row.
+            if (!oneRow) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = spacing.medium, vertical = spacing.tiny),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(spacing.tiny),
+                ) {
+                    Box {
+                        var menuOpen by remember { mutableStateOf(false) }
+                        IconToggle(
+                            Icons.Default.Loop,
+                            if (looping) "Loop: ${loopLabel ?: "on"}" else "Loop",
+                            checked = looping,
+                            onClick = {
+                                if (onChooseLoop == null) onToggleLoop() else menuOpen = true
+                            },
+                        )
+                        if (onChooseLoop != null) {
+                            DropdownMenu(
+                                expanded = menuOpen,
+                                onDismissRequest = { menuOpen = false },
+                            ) {
+                                for (scope in LoopScope.entries) {
+                                    DropdownMenuItem(
+                                        text = { Text(scope.label) },
+                                        onClick = { menuOpen = false; onChooseLoop(scope) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    IconToggle(
+                        Icons.Default.GraphicEq, "Metronome",
+                        checked = metronomeEnabled,
+                        accent = MusicColors.harmony[0],
+                        onClick = onToggleMetronome,
+                    )
+                    if (looping && loopLabel != null) {
+                        Text(
+                            "loop: $loopLabel",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    IconToggle(Icons.Default.Undo, "Undo", enabled = canUndo, onClick = onUndo)
+                    IconToggle(Icons.Default.Redo, "Redo", enabled = canRedo, onClick = onRedo)
                 }
             }
 

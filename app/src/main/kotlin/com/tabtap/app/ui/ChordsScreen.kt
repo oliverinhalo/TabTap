@@ -104,6 +104,15 @@ fun ChordsScreen(
             .padding(spacing.medium),
         verticalArrangement = Arrangement.spacedBy(spacing.medium),
     ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Chords",
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.weight(1f),
+            )
+            com.tabtap.app.ui.help.HelpButton("chords")
+        }
+
         // --- Build a chord ---
         Panel(title = "Chord") {
             Column {

@@ -59,7 +59,9 @@ import com.tabtap.app.ui.components.SectionLabel
 import com.tabtap.app.ui.components.SegmentedControl
 import com.tabtap.app.ui.components.TabTapChip
 import com.tabtap.app.ui.components.TrackDot
+import com.tabtap.app.PlayAlongMode
 import com.tabtap.app.ui.fretboard.FretboardView
+import com.tabtap.app.ui.help.HelpButton
 import com.tabtap.app.ui.fretboard.buildFretboardMarks
 import com.tabtap.app.ui.panels.DisplayPanel
 import com.tabtap.app.ui.panels.HarmonyPanel
@@ -198,6 +200,8 @@ fun StudioScreen(
                             },
                         )
                         Spacer(Modifier.height(spacing.small))
+                        WorkflowBar(model, state, onOpenTool = { tool = it })
+                        Spacer(Modifier.height(spacing.tiny))
                         EntryToolbar(model, state, onOpenTool = { tool = it })
                     }
 
@@ -217,6 +221,18 @@ fun StudioScreen(
                             label = { it.title },
                             modifier = Modifier.weight(1f),
                             compact = true,
+                        )
+                        Spacer(Modifier.width(spacing.tiny))
+                        // Help for whichever view is showing — which is how you find out
+                        // what the score actually is for.
+                        HelpButton(
+                            when (state.pane) {
+                                StudioPane.FRETBOARD -> "fretboard"
+                                StudioPane.TAB -> "tab"
+                                StudioPane.PIANO_ROLL -> "pianoroll"
+                                StudioPane.SCORE -> "score"
+                            },
+                            size = 38.dp,
                         )
                     }
 
@@ -287,6 +303,104 @@ fun StudioScreen(
                 ) {
                     ToolContent(model, state, tool) { tool = StudioTool.NONE }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * The workflow bar: harmonise, and choose what you hear.
+ *
+ * These were behind chips that you had to know to tap, which made the app's whole point
+ * — play a line, harmonise it, then play along with the other part — invisible. They are
+ * now the most prominent controls on the screen after the fretboard itself, and they
+ * change as you go: Harmonise until there is a harmony, then the play-along choices.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun WorkflowBar(
+    model: StudioViewModel,
+    state: StudioUiState,
+    onOpenTool: (StudioTool) -> Unit,
+) {
+    val spacing = LocalSpacing.current
+    val colors = LocalTabTapColors.current
+    val lead = state.leadTrack
+    val noteCount = lead?.notes?.size ?: 0
+
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(spacing.small)) {
+
+            // --- Harmonise ---
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = model::harmoniseLead,
+                    enabled = noteCount > 0,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        when {
+                            noteCount == 0 -> "Harmonise"
+                            state.hasHarmony -> "Harmonise again"
+                            else -> "Harmonise these $noteCount notes"
+                        },
+                    )
+                }
+                Spacer(Modifier.width(spacing.small))
+                TabTapChip(
+                    text = state.stagedHarmonies.firstOrNull()?.displayName ?: "Choose",
+                    onClick = { onOpenTool(StudioTool.HARMONY) },
+                )
+                Spacer(Modifier.width(spacing.tiny))
+                HelpButton("harmony", size = 40.dp)
+            }
+
+            if (noteCount == 0) {
+                Spacer(Modifier.height(spacing.tiny))
+                Text(
+                    "Tap notes on the fretboard above, then harmonise them.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textTertiary,
+                )
+            }
+
+            // --- Play along ---
+            if (state.hasHarmony || state.composition.chordProgression.isNotEmpty()) {
+                Spacer(Modifier.height(spacing.small))
+                HairlineDivider()
+                Spacer(Modifier.height(spacing.small))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionLabel("Play along \u2014 you hear", Modifier.weight(1f))
+                    HelpButton("playalong", size = 34.dp)
+                }
+                Spacer(Modifier.height(spacing.tiny))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(spacing.tiny),
+                    verticalArrangement = Arrangement.spacedBy(spacing.tiny),
+                ) {
+                    for (mode in PlayAlongMode.entries) {
+                        TabTapChip(
+                            text = mode.label,
+                            selected = mode == state.playAlong,
+                            accent = when (mode) {
+                                PlayAlongMode.I_PLAY_LEAD -> MusicColors.harmony[0]
+                                PlayAlongMode.I_PLAY_HARMONY -> MusicColors.original
+                                else -> null
+                            },
+                            onClick = { model.setPlayAlong(mode) },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(spacing.tiny))
+                Text(
+                    state.playAlong.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textTertiary,
+                )
             }
         }
     }
@@ -677,6 +791,20 @@ private fun ToolContent(
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.weight(1f),
             )
+            HelpButton(
+                when (tool) {
+                    StudioTool.RHYTHM -> "rhythm"
+                    StudioTool.HARMONY -> "harmony"
+                    StudioTool.KEY -> "key"
+                    StudioTool.INSTRUMENT -> "instrument"
+                    StudioTool.MIXER -> "playalong"
+                    StudioTool.DISPLAY -> "fretboard"
+                    StudioTool.INSPECTOR -> "tab"
+                    StudioTool.NONE -> "start"
+                },
+                size = 38.dp,
+            )
+            Spacer(Modifier.width(spacing.small))
             OutlinedButton(onClick = onClose) { Text("Done") }
         }
         HairlineDivider()

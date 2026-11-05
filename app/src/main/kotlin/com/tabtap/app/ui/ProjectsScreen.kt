@@ -79,6 +79,7 @@ fun ProjectsScreen(
     var showNewDialog by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<ProjectSummary?>(null) }
     var deleting by remember { mutableStateOf<ProjectSummary?>(null) }
+    var showHelp by remember { mutableStateOf(false) }
 
     Column(modifier.fillMaxSize()) {
         Row(
@@ -90,15 +91,21 @@ fun ProjectsScreen(
             Column(Modifier.weight(1f)) {
                 Text("Projects", style = MaterialTheme.typography.headlineMedium)
                 Text(
-                    if (projects.isEmpty()) {
-                        "Nothing yet"
-                    } else {
-                        "${projects.size} project${if (projects.size > 1) "s" else ""}"
+                    buildString {
+                        if (projects.isEmpty()) {
+                            append("Nothing yet")
+                        } else {
+                            append("${projects.size} project${if (projects.size > 1) "s" else ""}")
+                        }
+                        // The version is shown so it is obvious which build is installed.
+                        append("  \u00B7  TabTap ")
+                        append(com.tabtap.app.BuildConfig.VERSION_NAME)
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            com.tabtap.app.ui.help.HelpButton("start")
             OutlinedButton(onClick = onImport) { Text("Import") }
             Spacer(Modifier.width(spacing.small))
             Button(onClick = { showNewDialog = true }) { Text("New project") }
@@ -110,7 +117,10 @@ fun ProjectsScreen(
                 "Choose an instrument and a tuning, tap a line onto the fretboard, then " +
                     "give it a rhythm and harmonise it.",
                 action = {
-                    Button(onClick = { showNewDialog = true }) { Text("New project") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(spacing.small)) {
+                        Button(onClick = { showNewDialog = true }) { Text("New project") }
+                        OutlinedButton(onClick = { showHelp = true }) { Text("How it works") }
+                    }
                 },
             )
         } else {
@@ -134,6 +144,13 @@ fun ProjectsScreen(
                 }
             }
         }
+    }
+
+    if (showHelp) {
+        com.tabtap.app.ui.help.HelpDialog(
+            startTopicId = com.tabtap.app.ui.help.Help.gettingStarted.id,
+            onDismiss = { showHelp = false },
+        )
     }
 
     if (showNewDialog) {

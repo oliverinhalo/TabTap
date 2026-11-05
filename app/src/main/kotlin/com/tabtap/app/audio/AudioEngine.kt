@@ -233,6 +233,7 @@ class AudioEngine {
             buses = Array(voices.size) { InstrumentBus(sampleRate) }
             mixes = Array(voices.size) { BusMix() }
         }
+        chordBusPresent = composition.chordProgression.isNotEmpty()
         voices.forEachIndexed { i, v -> buses[i].configure(v) }
         updateMix(composition)
     }
@@ -254,12 +255,30 @@ class AudioEngine {
             mixes.getOrNull(composition.tracks.size)?.let {
                 it.gain = 0.6f
                 it.pan = 0f
-                it.audible = composition.tracks.none { t -> t.soloed }
+                it.audible = chordsAudible && composition.tracks.none { t -> t.soloed }
             }
         }
     }
 
     fun setMetronomeLevel(level: Float) { metronomeLevel = level.coerceIn(0f, 1f) }
+
+    /**
+     * Silence or restore the chord backing without touching the tracks.
+     *
+     * The chord progression is not a track, so it needs its own switch; applying it to
+     * the bus rather than rebuilding the schedule means it takes effect at the next
+     * buffer, mid-playback.
+     */
+    fun setChordsAudible(audible: Boolean) {
+        chordsAudible = audible
+        // The chord bus is the one after the last track, when there is one.
+        if (buses.isNotEmpty() && mixes.size == buses.size) {
+            mixes.lastOrNull()?.let { if (chordBusPresent) it.audible = audible }
+        }
+    }
+
+    @Volatile private var chordsAudible: Boolean = true
+    @Volatile private var chordBusPresent: Boolean = false
 
     fun setMasterGain(gain: Float) { masterGain = gain.coerceIn(0f, 1.5f) }
 

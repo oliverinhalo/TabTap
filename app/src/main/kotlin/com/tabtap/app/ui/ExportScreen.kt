@@ -154,6 +154,15 @@ fun ExportScreen(
             .padding(spacing.medium),
         verticalArrangement = Arrangement.spacedBy(spacing.medium),
     ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Export",
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.weight(1f),
+            )
+            com.tabtap.app.ui.help.HelpButton("export")
+        }
+
         Panel(title = "Project") {
             Column {
                 ReadoutRow("Name", state.projectName)
