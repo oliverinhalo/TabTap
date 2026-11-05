@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      A bare splash theme. All real styling is done in Compose, in
+      com.tabtap.app.design.TabTapTheme; this exists only so the window background
+      matches the app before the first frame and there is no white flash.
+    -->
+    <style name="Theme.TabTap" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/surface_base</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
