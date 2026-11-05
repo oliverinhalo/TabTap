@@ -52,7 +52,8 @@ fun ScorePane(
     scrollState: ScrollState = rememberScrollState(),
     /** Show only this track; null shows every track. */
     onlyTrackId: Long? = null,
-    staffSizeDp: Int = 9,
+    /** Multiplies the engraved size, for readability. */
+    scale: Float = 1f,
     /** Tap a notehead. The second argument is true for an additive (long-press) tap. */
     onSelectNote: (Long, Boolean) -> Unit = { _, _ -> },
     /**
@@ -80,7 +81,7 @@ fun ScorePane(
             .background(Color(ScorePalette.DARK.background)),
     ) {
         val widthPx = with(density) { maxWidth.toPx() } - with(density) { 24.dp.toPx() }
-        val spacePx = with(density) { staffSizeDp.dp.toPx() }
+        val spacePx = with(density) { (9.dp * scale.coerceIn(0.7f, 2.6f)).toPx() }
         val painter = remember(spacePx) { ScorePainter(spacePx, ScorePalette.DARK) }
 
         Column(

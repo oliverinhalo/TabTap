@@ -86,6 +86,24 @@ class StringVoice(private val sampleRate: Int) : Voice {
     private var mask = buffer.size - 1
     private var writeIndex = 0
 
+    /**
+     * A second delay line, detuned by a few cents and damped slightly differently.
+     *
+     * A real string vibrates in two planes at once — roughly horizontal and vertical —
+     * and the two have slightly different frequencies and decay rates because the bridge
+     * is not symmetric. The result is a slow beating and a much fuller tone. A single
+     * delay line is the reason a plain Karplus–Strong pluck sounds thin and synthetic;
+     * modelling the second polarisation is the standard fix and costs one more delay
+     * line.
+     */
+    private var buffer2 = FloatArray(1 shl 12)
+    private var mask2 = buffer2.size - 1
+    private var writeIndex2 = 0
+    private var integerDelay2 = 100
+    private var loopGain2 = 0.999f
+    private val loopFilter2 = OnePole()
+    private val fractionalDelay2 = AllPass()
+
     private val loopFilter = OnePole()
     private val fractionalDelay = AllPass()
     private val dcBlocker = Biquad().apply { highPass(sampleRate, 25f, 0.707f) }
@@ -110,6 +128,14 @@ class StringVoice(private val sampleRate: Int) : Voice {
     private var bendRelease = false
     private var samplesSinceStart = 0L
     private var dead = false
+
+    private companion object {
+        /**
+         * Frequency ratio between the two vibration planes: about four cents, which beats
+         * roughly once a second on a low string and is inaudible as mistuning.
+         */
+        const val DETUNE_RATIO = 1.0023f
+    }
 
     /** Set while the voice is sounding, so the engine can steal or re-trigger it. */
     var noteKey: Int = -1
@@ -151,6 +177,9 @@ class StringVoice(private val sampleRate: Int) : Voice {
         val brightness = articulation.brightness.coerceIn(0f, 1f)
         val cutoff = (f * (3f + 9f * brightness)).coerceIn(400f, sampleRate * 0.45f)
         loopFilter.setCutoff(sampleRate, cutoff)
+        // The second plane is a touch darker, so it outlives the first in the low
+        // partials and the tone opens out as the note decays, as a real string does.
+        loopFilter2.setCutoff(sampleRate, cutoff * 0.82f)
         setPeriod(periodSamples)
 
         // Energy loss per round trip. A dead note loses almost everything immediately.
@@ -164,6 +193,8 @@ class StringVoice(private val sampleRate: Int) : Voice {
                 exp(-6.9078f / periods)   // -60 dB over the decay time
             }
         }.coerceIn(0.5f, 0.99995f)
+        // Slightly longer decay on the second plane, which is what produces the beating.
+        loopGain2 = (loopGain * 1.0008f).coerceAtMost(0.99996f)
 
         amplitude = velocity.coerceIn(0.02f, 1f)
         vibratoDepth = articulation.vibratoDepth
@@ -245,12 +276,36 @@ class StringVoice(private val sampleRate: Int) : Voice {
         val scale = amplitude / peak
 
         java.util.Arrays.fill(buffer, 0f)
+        java.util.Arrays.fill(buffer2, 0f)
         writeIndex = 0
+        writeIndex2 = 0
         for (i in 0 until length) {
             buffer[i and mask] = scratch[i] * scale
         }
+        // The second plane is excited by the same pluck but with a little less energy and
+        // the opposite sign, as a pick striking a string off-axis does.
+        val length2 = (integerDelay2 + 1).coerceAtMost(buffer2.size - 1)
+        for (i in 0 until length2) {
+            buffer2[i and mask2] = -scratch[i.coerceAtMost(length - 1)] * scale * 0.62f
+        }
         writeIndex = length and mask
+        writeIndex2 = length2 and mask2
+
+        // A short, bright transient for the pick itself. Without it the attack is all
+        // string and no plectrum, which is a lot of why a pluck can sound synthetic.
+        pickRemaining = (sampleRate * 0.012).toInt()
+        pickTotal = pickRemaining.coerceAtLeast(1)
+        pickAmplitude = amplitude * (0.10f + 0.22f * velocity.coerceIn(0f, 1f)) *
+            if (articulation.dead) 1.5f else 1f
+        pickFilter.reset()
+        pickFilter.bandPass(sampleRate, (2200f + 2600f * velocity).coerceAtMost(sampleRate * 0.4f), 0.8f)
     }
+
+    private var pickRemaining = 0
+    private var pickTotal = 1
+    private var pickAmplitude = 0f
+    private val pickFilter = Biquad()
+    private val pickNoise = Noise(4242)
 
     private fun ensureCapacity(samples: Int) {
         var size = buffer.size
@@ -261,6 +316,9 @@ class StringVoice(private val sampleRate: Int) : Voice {
             buffer = FloatArray(size)
             mask = size - 1
             writeIndex = 0
+            buffer2 = FloatArray(size)
+            mask2 = size - 1
+            writeIndex2 = 0
         }
     }
 
@@ -278,6 +336,14 @@ class StringVoice(private val sampleRate: Int) : Voice {
         val total = (period - filterDelay).toFloat().coerceAtLeast(2f)
         integerDelay = total.toInt()
         fractionalDelay.setFraction(total - integerDelay)
+
+        // The second polarisation is detuned by about four cents, which is enough to beat
+        // audibly over a second or two without sounding out of tune.
+        val period2 = period * DETUNE_RATIO
+        val omega2 = 2.0 * PI / period2
+        val total2 = (period2 - loopFilter2.phaseDelaySamples(omega2)).toFloat().coerceAtLeast(2f)
+        integerDelay2 = total2.toInt()
+        fractionalDelay2.setFraction(total2 - integerDelay2)
     }
 
     override fun render(out: FloatArray, from: Int, count: Int) {
@@ -317,11 +383,25 @@ class StringVoice(private val sampleRate: Int) : Voice {
             buffer[writeIndex] = fed
             writeIndex = (writeIndex + 1) and mask
 
+            // The second polarisation, running its own loop at its own slight detune.
+            val readIndex2 = (writeIndex2 - integerDelay2) and mask2
+            val fed2 = loopFilter2.process(fractionalDelay2.process(buffer2[readIndex2])) * loopGain2
+            buffer2[writeIndex2] = fed2
+            writeIndex2 = (writeIndex2 + 1) and mask2
+
             // The release is an output envelope, not a loop loss. A factor applied
             // inside the loop only compounds once per round trip — hundreds of samples
             // for a low string — which would make the release almost inaudible.
             if (releasing) releaseGain *= releaseCoefficient
-            val sample = dcBlocker.process(fed) * releaseGain
+
+            var pick = 0f
+            if (pickRemaining > 0) {
+                val progress = 1f - pickRemaining.toFloat() / pickTotal
+                pick = pickFilter.process(pickNoise.next()) * pickAmplitude * exp(-14f * progress)
+                pickRemaining--
+            }
+
+            val sample = (dcBlocker.process(fed + fed2 * 0.55f) + pick) * releaseGain
             out[from + i] += sample
             val magnitude = abs(sample)
             if (magnitude > peak) peak = magnitude
@@ -356,9 +436,13 @@ class StringVoice(private val sampleRate: Int) : Voice {
         releasing = false
         noteKey = -1
         java.util.Arrays.fill(buffer, 0f)
+        java.util.Arrays.fill(buffer2, 0f)
         loopFilter.reset()
+        loopFilter2.reset()
         fractionalDelay.reset()
+        fractionalDelay2.reset()
         dcBlocker.reset()
+        pickRemaining = 0
         lastLevel = 0f
     }
 }

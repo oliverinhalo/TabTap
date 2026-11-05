@@ -453,6 +453,8 @@ fun MixerPanel(
     onSetVoice: (Long, InstrumentVoice) -> Unit,
     onRemoveTrack: (Long) -> Unit,
     onAddTrack: () -> Unit,
+    reverbMix: Float = 0.16f,
+    onSetReverbMix: (Float) -> Unit = {},
 ) {
     val spacing = LocalSpacing.current
     val colors = LocalTabTapColors.current
@@ -546,6 +548,16 @@ fun MixerPanel(
                     com.tabtap.app.ui.components.HairlineDivider()
                 }
             }
+            Spacer(Modifier.height(spacing.small))
+            // The room on the output. A completely dry guitar sounds thin however good
+            // the string model is, so there is a little by default.
+            LabeledSlider(
+                label = "Room",
+                value = reverbMix,
+                onValueChange = onSetReverbMix,
+                valueRange = 0f..0.5f,
+                valueText = if (reverbMix < 0.01f) "dry" else "${(reverbMix * 200).roundToInt()}%",
+            )
             Spacer(Modifier.height(spacing.small))
             OutlinedButton(onClick = onAddTrack, modifier = Modifier.fillMaxWidth()) {
                 Text("Add a track")

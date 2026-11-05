@@ -64,6 +64,15 @@ class AudioEngine {
     private lateinit var mixBuffer: FloatArray
     private val limiter = Limiter(sampleRate)
 
+    /**
+     * A short room on the master bus.
+     *
+     * Every instrument is heard in a space; a completely dry output is the main reason
+     * synthesised guitar sounds thin, however good the string model is. It sits after the
+     * track mix and before the limiter, which is where a room belongs.
+     */
+    private val reverb = Reverb(sampleRate)
+
     /** One bus per track, plus one for fretboard previews. */
     private var buses: Array<InstrumentBus> = arrayOf()
     private var mixes: Array<BusMix> = arrayOf()
@@ -177,6 +186,7 @@ class AudioEngine {
         mixBuffer = FloatArray(blockFrames * channels)
         clickBuffer = FloatArray(blockFrames)
         limiter.reset()
+        reverb.reset()
         built.play()
         track = built
         running.set(true)
@@ -281,6 +291,11 @@ class AudioEngine {
     @Volatile private var chordBusPresent: Boolean = false
 
     fun setMasterGain(gain: Float) { masterGain = gain.coerceIn(0f, 1.5f) }
+
+    /** How much room is on the output. 0 is completely dry. */
+    fun setReverbMix(mix: Float) { reverb.mix = mix.coerceIn(0f, 0.6f) }
+
+    val reverbMix: Float get() = reverb.mix
 
     /** Configure the bus used for fretboard taps and chord previews. */
     fun setPreviewVoice(voice: InstrumentVoice) {
@@ -465,8 +480,9 @@ class AudioEngine {
                 }
             }
 
-            // Master gain, then a soft limiter so several distorted tracks together
-            // cannot clip the output into a buzz.
+            // The room, then master gain, then a soft limiter so several distorted
+            // tracks together cannot clip the output into a buzz.
+            reverb.process(mixBuffer, 0, frames)
             if (masterGain != 1f) {
                 for (i in 0 until frames * channels) mixBuffer[i] *= masterGain
             }

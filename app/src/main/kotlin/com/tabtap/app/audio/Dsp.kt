@@ -269,6 +269,132 @@ class Limiter(sampleRate: Int) {
     }
 }
 
+/**
+ * A small room reverb, in the Schroeder/Freeverb arrangement: parallel comb filters
+ * feeding series all-passes, per channel, with the right channel's delays offset so the
+ * result is stereo.
+ *
+ * A completely dry guitar sounds thin however good the string model is, because no
+ * instrument is ever heard without a room around it. This is deliberately a short, quiet
+ * room rather than an effect — enough to put the instrument somewhere, not enough to
+ * notice as reverb.
+ */
+class Reverb(sampleRate: Int) {
+
+    // Freeverb's comb and all-pass lengths, scaled from its 44.1 kHz originals.
+    private val combLengths = intArrayOf(1116, 1188, 1277, 1356).map {
+        (it * sampleRate / 44_100).coerceAtLeast(8)
+    }
+    private val allPassLengths = intArrayOf(556, 441).map {
+        (it * sampleRate / 44_100).coerceAtLeast(8)
+    }
+
+    /** The right channel is offset so the two channels decorrelate into stereo. */
+    private val stereoOffset = (23 * sampleRate / 44_100).coerceAtLeast(1)
+
+    private val combsL = combLengths.map { Comb(it) }
+    private val combsR = combLengths.map { Comb(it + stereoOffset) }
+    private val allPassL = allPassLengths.map { AllPassDelay(it) }
+    private val allPassR = allPassLengths.map { AllPassDelay(it + stereoOffset) }
+
+    /** 0 = dry, 1 = drenched. Kept low by default: this is a room, not an effect. */
+    @Volatile var mix: Float = 0.16f
+
+    /** Room size, 0..1. */
+    var roomSize: Float = 0.74f
+        set(value) {
+            field = value.coerceIn(0f, 0.98f)
+            combsL.forEach { it.feedback = field }
+            combsR.forEach { it.feedback = field }
+        }
+
+    /** How dark the tail is, 0..1. */
+    var damping: Float = 0.38f
+        set(value) {
+            field = value.coerceIn(0f, 0.95f)
+            combsL.forEach { it.damping = field }
+            combsR.forEach { it.damping = field }
+        }
+
+    init {
+        roomSize = roomSize
+        damping = damping
+    }
+
+    fun reset() {
+        combsL.forEach { it.reset() }
+        combsR.forEach { it.reset() }
+        allPassL.forEach { it.reset() }
+        allPassR.forEach { it.reset() }
+    }
+
+    /** Process [frames] interleaved stereo frames in place. */
+    fun process(buffer: FloatArray, from: Int, frames: Int) {
+        val wet = mix
+        if (wet <= 0.001f) return
+        val dry = 1f - wet * 0.35f     // Only a little dry attenuation: this is a send.
+        var i = from
+        val end = from + frames * 2
+        while (i < end) {
+            val inL = buffer[i]
+            val inR = buffer[i + 1]
+            val input = (inL + inR) * 0.5f * 0.3f
+
+            var wetL = 0f
+            var wetR = 0f
+            for (c in combsL) wetL += c.process(input)
+            for (c in combsR) wetR += c.process(input)
+            for (a in allPassL) wetL = a.process(wetL)
+            for (a in allPassR) wetR = a.process(wetR)
+
+            buffer[i] = inL * dry + wetL * wet
+            buffer[i + 1] = inR * dry + wetR * wet
+            i += 2
+        }
+    }
+
+    /** A low-pass-damped comb filter: one of the parallel elements of the room. */
+    private class Comb(size: Int) {
+        private val line = FloatArray(size)
+        private var index = 0
+        private var store = 0f
+        var feedback = 0.74f
+        var damping = 0.38f
+
+        fun reset() {
+            java.util.Arrays.fill(line, 0f)
+            store = 0f
+        }
+
+        fun process(x: Float): Float {
+            val out = line[index]
+            store = out * (1f - damping) + store * damping
+            line[index] = x + store * feedback
+            index++
+            if (index >= line.size) index = 0
+            return out
+        }
+    }
+
+    /** A Schroeder all-pass, which smears the comb output without colouring it. */
+    private class AllPassDelay(size: Int) {
+        private val line = FloatArray(size)
+        private var index = 0
+        private val feedback = 0.5f
+
+        fun reset() = java.util.Arrays.fill(line, 0f)
+
+        fun process(x: Float): Float {
+            val buffered = line[index]
+            val out = -x + buffered
+            line[index] = x + buffered * feedback
+            index++
+            if (index >= line.size) index = 0
+            return out
+        }
+    }
+}
+
 /** A deterministic noise source, so a rendered take sounds identical every time. */
 class Noise(seed: Long = 0x5DEECE66DL) {
     private var state = seed or 1L

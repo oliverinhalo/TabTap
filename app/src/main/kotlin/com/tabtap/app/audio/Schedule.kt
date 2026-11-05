@@ -145,10 +145,18 @@ object Sequencer {
         composition.tracks.forEachIndexed { busIndex, track ->
             busVoices += track.voice
             trackIds += track.id
+
+            // When each note actually stops sounding, which is not where it stops being
+            // written. A plucked string rings on after the written length until that
+            // same string is played again — that is the single biggest difference
+            // between a guitar and a keyboard, and cutting every note off at its written
+            // end is what makes tab playback sound clipped and mechanical.
+            val ringUntil = ringOutMap(track, endTick, composition.bpm)
+
             for (note in track.notes) {
                 if (note.endTick <= fromTick || note.startTick >= endTick) continue
                 val startTick = maxOf(note.startTick, fromTick)
-                val stopTick = minOf(note.endTick, endTick)
+                val stopTick = ringUntil[note.id] ?: note.endTick
                 addNote(events, note, track, busIndex, frameOf(startTick), frameOf(stopTick), sampleRate)
             }
         }
@@ -226,6 +234,57 @@ object Sequencer {
         }
         return out
     }
+
+    /**
+     * How long each note of [track] rings for.
+     *
+     * A note rings until the next note on the *same string* is played, or until a
+     * generous ceiling, whichever comes first — because that is what physically happens:
+     * lifting a finger does not silence a string, but fretting it again does. Notes that
+     * are explicitly damped keep their written length, and notes marked to let ring are
+     * given the full ceiling.
+     *
+     * The ceiling is in seconds rather than ticks so it does not change with the tempo,
+     * which is right: a string's decay does not know what tempo you are playing at.
+     */
+    private fun ringOutMap(track: Track, endTick: Long, bpm: Double): Map<Long, Long> {
+        val out = HashMap<Long, Long>(track.notes.size)
+        val ceilingTicks = Ticks.fromSeconds(MAX_RING_SECONDS, bpm)
+
+        // Group by string so each string's own sequence decides where its notes stop.
+        val byString = track.notes.groupBy { it.string }
+        for ((string, notes) in byString) {
+            val ordered = notes.sortedBy { it.startTick }
+            for ((index, note) in ordered.withIndex()) {
+                // A damped note is as short as it is written; that is the point of damping.
+                val damped = note.has(Articulation.STACCATO) ||
+                    note.has(Articulation.DEAD_NOTE) ||
+                    note.has(Articulation.PALM_MUTE)
+                if (damped) {
+                    out[note.id] = note.endTick
+                    continue
+                }
+                // A note with no fretted position has no string to be stopped by.
+                val nextOnThisString = if (string == null) {
+                    null
+                } else {
+                    ordered.getOrNull(index + 1)?.startTick
+                }
+                // Deliberately not clamped to the end of the piece: that length depends
+                // on the tempo, so clamping to it would make a string ring for less time
+                // at a fast tempo than a slow one, which is not how a string behaves. The
+                // schedule's length follows the last event, so a note ringing past the
+                // final bar is covered.
+                val ceiling = note.startTick + ceilingTicks
+                val limit = listOfNotNull(nextOnThisString, ceiling).min()
+                out[note.id] = maxOf(note.endTick, limit)
+            }
+        }
+        return out
+    }
+
+    /** How long a plucked string is allowed to ring, in seconds. */
+    private const val MAX_RING_SECONDS = 2.6
 
     private fun addNote(
         events: MutableList<ScheduledEvent>,

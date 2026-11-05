@@ -77,6 +77,8 @@ object Help {
                 "Pinch to show more or less of the neck; drag sideways to move along it.",
             ),
             tips = listOf(
+                "Big fretboard gives the whole screen to the neck, with just the note " +
+                    "length and undo underneath — the quickest way to play a line in.",
                 "The numbers in the dots are the order the notes will play in.",
                 "The faint dots are the notes of the key you have chosen — handy for " +
                     "staying in key while you work out a line.",
@@ -158,7 +160,8 @@ object Help {
             ),
             tips = listOf(
                 "Loop the whole section and it will go round and round while you practise.",
-                "The Mixer has per-part volume, pan, mute and solo if you want finer control.",
+                "The Mixer has per-part volume, pan, mute and solo if you want finer " +
+                    "control, and a Room slider that sets how much space is around the sound.",
             ),
         ),
 
@@ -195,6 +198,7 @@ object Help {
                 "Tap an empty spot on a line to add a note there.",
             ),
             tips = listOf(
+                "The − and + next to the view buttons make the tab bigger or smaller.",
                 "The marks under the staff are the rhythm: a stem per note, beams for " +
                     "eighths and shorter.",
                 "Editing here changes the actual music, so the fretboard and the score " +
@@ -238,6 +242,7 @@ object Help {
             tips = listOf(
                 "This is for reading and for printing — it is the view to use if you want " +
                     "sheet music rather than tab, or if someone else needs to read your part.",
+                "The − and + next to the view buttons make the score bigger or smaller.",
                 "The key signature, the accidentals, the beams, the rests and the ties are " +
                     "all worked out from your notes; you do not place them.",
                 "Guitar and bass music is written an octave above where it sounds, which is " +

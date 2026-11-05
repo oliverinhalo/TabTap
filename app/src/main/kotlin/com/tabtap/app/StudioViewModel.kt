@@ -177,6 +177,15 @@ data class StudioUiState(
     val rhythmTemplate: List<Long> = emptyList(),
     /** Show every part's tablature at once, rather than only the track being edited. */
     val showAllTabs: Boolean = true,
+    /**
+     * How large the tab and the score are drawn, 1.0 being the default. Readability on a
+     * phone is a matter of taste and eyesight, so it is a control rather than a constant.
+     */
+    val notationScale: Float = 1.25f,
+    /** Give the fretboard the whole screen, for playing a line in quickly. */
+    val focusFretboard: Boolean = false,
+    /** How much room is on the output. */
+    val reverbMix: Float = 0.16f,
     val isLoading: Boolean = false,
 ) {
     val activeTrack: Track? get() = composition.activeTrack
@@ -465,6 +474,26 @@ class StudioViewModel(
     }
 
     // ---------------------------------------------------------------- view options
+
+    fun setNotationScale(scale: Float) {
+        _state.value = _state.value.copy(notationScale = scale.coerceIn(0.7f, 2.6f))
+    }
+
+    /**
+     * Focus mode: the fretboard fills the screen.
+     *
+     * Playing a line in is the thing you do most and the thing the smallest amount of
+     * screen was being given to, once the workflow bar, the entry controls and the pane
+     * switcher had taken their share.
+     */
+    fun setFocusFretboard(focus: Boolean) {
+        _state.value = _state.value.copy(focusFretboard = focus)
+    }
+
+    fun setReverbMix(mix: Float) {
+        _state.value = _state.value.copy(reverbMix = mix.coerceIn(0f, 0.6f))
+        engine.setReverbMix(mix)
+    }
 
     fun setShowAllTabs(show: Boolean) {
         _state.value = _state.value.copy(showAllTabs = show)
@@ -1480,6 +1509,7 @@ class StudioViewModel(
         val state = _state.value
         engine.prepare(state.composition)
         engine.setMetronomeLevel(state.metronomeLevel)
+        engine.setReverbMix(state.reverbMix)
         val schedule = Sequencer.build(
             composition = if (includeTracks) {
                 state.composition

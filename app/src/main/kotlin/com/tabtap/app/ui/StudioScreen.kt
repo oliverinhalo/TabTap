@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.Button
@@ -164,7 +165,13 @@ fun StudioScreen(
                         .fillMaxHeight(),
                 ) {
                     // --- The fretboard ---
-                    Column(Modifier.padding(spacing.small)) {
+                    Column(
+                        Modifier
+                            .padding(spacing.small)
+                            // In focus mode the fretboard takes everything that is left,
+                            // which on a phone roughly doubles its height.
+                            .then(if (state.focusFretboard) Modifier.weight(1f) else Modifier),
+                    ) {
                         FretboardView(
                             fretboard = track.fretboard,
                             key = state.composition.key,
@@ -198,13 +205,25 @@ fun StudioScreen(
                                     ),
                                 )
                             },
+                            modifier = if (state.focusFretboard) {
+                                Modifier.weight(1f)
+                            } else {
+                                Modifier
+                            },
                         )
                         Spacer(Modifier.height(spacing.small))
-                        WorkflowBar(model, state, onOpenTool = { tool = it })
-                        Spacer(Modifier.height(spacing.tiny))
-                        EntryToolbar(model, state, onOpenTool = { tool = it })
+                        if (state.focusFretboard) {
+                            // Focus mode keeps only what you need while playing a line
+                            // in: the note length, undo, and the way out.
+                            FocusStrip(model, state)
+                        } else {
+                            WorkflowBar(model, state, onOpenTool = { tool = it })
+                            Spacer(Modifier.height(spacing.tiny))
+                            EntryToolbar(model, state, onOpenTool = { tool = it })
+                        }
                     }
 
+                    if (!state.focusFretboard) {
                     HairlineDivider()
 
                     // --- The pane switcher ---
@@ -222,6 +241,19 @@ fun StudioScreen(
                             modifier = Modifier.weight(1f),
                             compact = true,
                         )
+                        // Zoom, for the views where readability matters.
+                        if (state.pane == StudioPane.TAB || state.pane == StudioPane.SCORE) {
+                            IconToggle(
+                                Icons.Default.Remove, "Smaller",
+                                size = 36.dp,
+                                enabled = state.notationScale > 0.75f,
+                            ) { model.setNotationScale(state.notationScale - 0.25f) }
+                            IconToggle(
+                                Icons.Default.Add, "Bigger",
+                                size = 36.dp,
+                                enabled = state.notationScale < 2.5f,
+                            ) { model.setNotationScale(state.notationScale + 0.25f) }
+                        }
                         Spacer(Modifier.width(spacing.tiny))
                         // Help for whichever view is showing — which is how you find out
                         // what the score actually is for.
@@ -266,6 +298,7 @@ fun StudioScreen(
                                 composition = state.composition,
                                 selectedNoteIds = state.selectedNoteIds,
                                 playheadTick = state.playback.tick.takeIf { state.isPlaying },
+                                scale = state.notationScale,
                                 onSelectNote = { id, additive ->
                                     if (additive) {
                                         model.toggleSelection(id)
@@ -279,6 +312,7 @@ fun StudioScreen(
                                 onTapEmpty = { model.setActiveTrack(it) },
                             )
                         }
+                    }
                     }
                 }
 
@@ -304,6 +338,53 @@ fun StudioScreen(
                     ToolContent(model, state, tool) { tool = StudioTool.NONE }
                 }
             }
+        }
+    }
+}
+
+/**
+ * The strip shown under the fretboard in focus mode.
+ *
+ * Only what you reach for while playing a line in: how long the notes are, undo, hear it
+ * back, and the way out. Everything else is a tap away once you stop.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun FocusStrip(model: StudioViewModel, state: StudioUiState) {
+    val spacing = LocalSpacing.current
+    val quick = listOf(
+        NoteValue.QUARTER, NoteValue.EIGHTH, NoteValue.SIXTEENTH,
+        NoteValue.TRIPLET_EIGHTH, NoteValue.DOTTED_EIGHTH, NoteValue.HALF,
+    )
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(spacing.tiny),
+                modifier = Modifier.weight(1f),
+            ) {
+                for (value in quick) {
+                    TabTapChip(
+                        text = valueLabel(value),
+                        selected = value == state.entryValue,
+                        onClick = { model.setEntryValue(value) },
+                    )
+                }
+            }
+            Text(
+                "${state.activeTrack?.notes?.size ?: 0}",
+                style = com.tabtap.app.design.MonoType.readout,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.height(spacing.tiny))
+        Row(horizontalArrangement = Arrangement.spacedBy(spacing.tiny)) {
+            IconToggle(Icons.Default.Undo, "Undo last note", enabled = state.canUndo) {
+                model.undo()
+            }
+            IconToggle(Icons.Default.PlayArrow, "Play") { model.play() }
+            IconToggle(Icons.Default.Stop, "Stop") { model.stop() }
+            Spacer(Modifier.weight(1f))
+            TabTapChip("Done", selected = true) { model.setFocusFretboard(false) }
         }
     }
 }
@@ -357,6 +438,17 @@ private fun WorkflowBar(
                 )
                 Spacer(Modifier.width(spacing.tiny))
                 HelpButton("harmony", size = 40.dp)
+            }
+
+            Spacer(Modifier.height(spacing.tiny))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TabTapChip("Big fretboard") { model.setFocusFretboard(true) }
+                Spacer(Modifier.width(spacing.tiny))
+                Text(
+                    "Fills the screen for playing a line in",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textTertiary,
+                )
             }
 
             if (noteCount == 0) {
@@ -565,6 +657,7 @@ private fun TabStack(model: StudioViewModel, state: StudioUiState) {
                     selectedNoteIds = state.selectedNoteIds,
                     playheadTick = state.playback.tick.takeIf { state.isPlaying },
                     minMeasures = state.composition.barCount,
+                    scale = state.notationScale,
                     onSelectNote = { id, additive ->
                         if (t.id != active.id) model.setActiveTrack(t.id)
                         if (additive) model.toggleSelection(id) else model.setSelection(setOf(id))
@@ -896,6 +989,8 @@ private fun ToolContent(
                     onSetVoice = model::setTrackVoice,
                     onRemoveTrack = model::removeTrack,
                     onAddTrack = model::addTrack,
+                    reverbMix = state.reverbMix,
+                    onSetReverbMix = model::setReverbMix,
                 )
                 StudioTool.DISPLAY -> DisplayPanel(
                     display = state.display,

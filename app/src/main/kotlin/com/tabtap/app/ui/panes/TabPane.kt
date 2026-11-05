@@ -44,6 +44,8 @@ fun TabPane(
     modifier: Modifier = Modifier,
     scrollState: ScrollState = rememberScrollState(),
     minMeasures: Int = 1,
+    /** Multiplies the drawn size, for readability. */
+    scale: Float = 1f,
     onSelectNote: (Long, Boolean) -> Unit,
     onAddNote: (string: Int, fret: Int, startTick: Long) -> Unit,
     onAdjustNote: (noteId: Long, fretDelta: Int) -> Unit = { _, _ -> },
@@ -57,8 +59,9 @@ fun TabPane(
             .background(ScorePalette.DARK.background.let { androidx.compose.ui.graphics.Color(it) }),
     ) {
         val widthPx = with(density) { maxWidth.toPx() }
-        val linePx = with(density) { 20.dp.toPx() }
-        val columnPx = with(density) { 11.dp.toPx() }
+        val zoom = scale.coerceIn(0.7f, 2.6f)
+        val linePx = with(density) { (20.dp * zoom).toPx() }
+        val columnPx = with(density) { (11.dp * zoom).toPx() }
 
         val layout = remember(track, timeSignature, chordProgression, minMeasures, widthPx) {
             TabEngraver.engrave(
