@@ -13,3 +13,8 @@ captures/
 
 # Robolectric's downloaded Android runtimes
 .robolectric/
+
+# Built artifacts and the Kotlin compiler's session files
+dist/
+.kotlin/
+*.idsig
