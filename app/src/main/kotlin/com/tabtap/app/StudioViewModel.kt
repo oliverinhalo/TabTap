@@ -104,10 +104,28 @@ data class ChordEditorState(
     val type: ChordType = ChordType.MAJOR,
     val inversion: Int = 0,
     val strum: StrumPattern = StrumPattern.BLOCK,
-    val durationValue: NoteValue = NoteValue.WHOLE,
+    /**
+     * Length in ticks. Chords are counted in bars and beats of the project's metre, not
+     * in note values — a whole note is a bar only in 4/4 — so the length is kept as
+     * ticks and the options offered are derived from the time signature.
+     */
+    val durationTicks: Int = 0,
     val voicingIndex: Int = 0,
+    /** When set, the editor is changing this existing chord rather than adding a new one. */
+    val editingChordId: Long? = null,
 ) {
     val chord: Chord? get() = Chord.of(rootName, type)?.inversion(inversion)
+    val isEditing: Boolean get() = editingChordId != null
+}
+
+/** What the loop covers. */
+enum class LoopScope(val label: String) {
+    OFF("Off"),
+    WHOLE("Whole section"),
+    CURRENT_BAR("This bar"),
+    TWO_BARS("2 bars"),
+    FOUR_BARS("4 bars"),
+    SELECTION("Selection"),
 }
 
 /** Everything a studio screen needs to draw itself. */
@@ -124,6 +142,7 @@ data class StudioUiState(
     val metronomeLevel: Float = 0.7f,
     val countInBars: Int = 1,
     val loop: LoopRegion? = null,
+    val loopScope: LoopScope = LoopScope.OFF,
     val playback: PlaybackPosition = PlaybackPosition(),
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
@@ -139,6 +158,8 @@ data class StudioUiState(
      * the fretboard takes the next onset, which is the "rhythm first" way of working.
      */
     val rhythmTemplate: List<Long> = emptyList(),
+    /** Show every part's tablature at once, rather than only the track being edited. */
+    val showAllTabs: Boolean = true,
     val isLoading: Boolean = false,
 ) {
     val activeTrack: Track? get() = composition.activeTrack
@@ -147,6 +168,20 @@ data class StudioUiState(
     val isPlaying: Boolean
         get() = playback.state == TransportState.PLAYING || playback.state == TransportState.COUNTING_IN
     val hasSelection: Boolean get() = selectedNoteIds.isNotEmpty()
+
+    /** A short description of the loop's extent, for the transport readout. */
+    val loopLabel: String?
+        get() {
+            val region = loop ?: return null
+            val bar = composition.timeSignature.barTicks.toLong()
+            val firstBar = region.startTick / bar + 1
+            val bars = ((region.endTick - region.startTick) + bar - 1) / bar
+            return when {
+                loopScope == LoopScope.WHOLE -> "all $bars bars"
+                bars <= 1 -> "bar $firstBar"
+                else -> "bars $firstBar\u2013${firstBar + bars - 1}"
+            }
+        }
 
     /** How many slots of the rhythm template are still to be filled. */
     val rhythmSlotsRemaining: Int
@@ -402,6 +437,10 @@ class StudioViewModel(
 
     // ---------------------------------------------------------------- view options
 
+    fun setShowAllTabs(show: Boolean) {
+        _state.value = _state.value.copy(showAllTabs = show)
+    }
+
     fun setPane(pane: StudioPane) {
         _state.value = _state.value.copy(pane = pane)
     }
@@ -588,6 +627,46 @@ class StudioViewModel(
         edit("Change length", coalesceKey = "duration-$noteId") {
             CompositionEditor.setNoteDuration(it, trackId, noteId, ticks)
         }
+    }
+
+    /** Double one note's length, up to a whole bar, for the inline rhythm controls. */
+    fun doubleNoteLength(noteId: Long) {
+        val state = _state.value
+        val trackId = state.activeTrackId ?: return
+        val note = state.activeTrack?.note(noteId) ?: return
+        val limit = state.composition.timeSignature.barTicks * 2
+        edit("Lengthen note", coalesceKey = "length-$noteId") {
+            CompositionEditor.setNoteDuration(
+                it, trackId, noteId, (note.durationTicks * 2).coerceAtMost(limit),
+            )
+        }
+    }
+
+    /** Halve one note's length, down to a 32nd. */
+    fun halveNoteLength(noteId: Long) {
+        val state = _state.value
+        val trackId = state.activeTrackId ?: return
+        val note = state.activeTrack?.note(noteId) ?: return
+        edit("Shorten note", coalesceKey = "length-$noteId") {
+            CompositionEditor.setNoteDuration(
+                it, trackId, noteId,
+                (note.durationTicks / 2).coerceAtLeast(Ticks.THIRTY_SECOND),
+            )
+        }
+    }
+
+    /** Sound one note on its own, so a length change can be heard. */
+    fun auditionNote(noteId: Long) {
+        val state = _state.value
+        val note = state.activeTrack?.note(noteId) ?: return
+        engine.setPreviewVoice(state.activeTrack?.voice ?: InstrumentVoice.ELECTRIC_CLEAN)
+        engine.preview(
+            listOf(note.pitch),
+            durationSeconds = com.tabtap.music.Ticks
+                .toSeconds(note.durationTicks.toLong(), state.composition.bpm)
+                .toFloat()
+                .coerceIn(0.1f, 6f),
+        )
     }
 
     fun setSelectionDuration(value: NoteValue) {
@@ -1114,6 +1193,13 @@ class StudioViewModel(
 
     // ---------------------------------------------------------------- chords
 
+    /** The chord length currently chosen, defaulting to one bar of the project's metre. */
+    private fun chordLengthTicks(): Int {
+        val state = _state.value
+        return state.chordEditor.durationTicks.takeIf { it > 0 }
+            ?: state.composition.timeSignature.barTicks
+    }
+
     fun setChordEditor(state: ChordEditorState) {
         _state.value = _state.value.copy(chordEditor = state)
         state.chord?.let { chord ->
@@ -1136,9 +1222,24 @@ class StudioViewModel(
         val state = _state.value
         val chord = state.chordEditor.chord ?: return
         val voicing = state.chordVoicings.getOrNull(state.chordEditor.voicingIndex)
+        // When the editor was opened on an existing chord, confirming updates it in
+        // place rather than appending a near-duplicate to the end.
+        val editingId = state.chordEditor.editingChordId
+        if (editingId != null) {
+            edit("Update ${chord.symbol}", rebuildBuses = true) {
+                CompositionEditor.replaceChord(
+                    it, editingId, chord, chordLengthTicks(), state.chordEditor.strum, voicing,
+                )
+            }
+            _state.value = _state.value.copy(
+                chordEditor = _state.value.chordEditor.copy(editingChordId = null),
+            )
+            emit("${chord.symbol} updated")
+            return
+        }
         edit("Add ${chord.symbol}", rebuildBuses = true) {
             CompositionEditor.appendChord(
-                it, chord, state.chordEditor.durationValue.ticks, state.chordEditor.strum, voicing,
+                it, chord, chordLengthTicks(), state.chordEditor.strum, voicing,
             )
         }
     }
@@ -1147,7 +1248,7 @@ class StudioViewModel(
         val state = _state.value
         edit("Add ${chord.symbol}", rebuildBuses = true) {
             CompositionEditor.appendChord(
-                it, chord, state.chordEditor.durationValue.ticks, state.chordEditor.strum,
+                it, chord, chordLengthTicks(), state.chordEditor.strum,
             )
         }
         engine.setPreviewVoice(InstrumentVoice.ACOUSTIC_STEEL)
@@ -1170,12 +1271,64 @@ class StudioViewModel(
         engine.preview(notes.map { it.pitch }, velocity = 0.75f)
     }
 
-    fun removeChord(chordId: Long) {
-        edit("Remove chord", rebuildBuses = true) { CompositionEditor.removeChord(it, chordId) }
+    /** Load an existing chord into the editor so it can be changed. */
+    fun beginEditChord(chordId: Long) {
+        val state = _state.value
+        val event = state.composition.chordProgression.firstOrNull { it.id == chordId } ?: return
+        val chord = event.chord
+        val voicings = com.tabtap.music.ChordVoicer.voicings(chord, state.fretboard, 8)
+        _state.value = state.copy(
+            chordEditor = ChordEditorState(
+                rootName = "${chord.root.letter}${chord.root.accidentalText}",
+                type = chord.type,
+                inversion = chord.bassPitchClass
+                    ?.let { bass -> chord.type.semitones.indexOfFirst { s ->
+                        ((chord.rootPitchClass + s) % 12 + 12) % 12 == bass
+                    } }
+                    ?.coerceAtLeast(0) ?: 0,
+                strum = event.strum,
+                durationTicks = event.durationTicks,
+                voicingIndex = voicings.indexOfFirst { it.frets == event.voicing?.frets }
+                    .coerceAtLeast(0),
+                editingChordId = chordId,
+            ),
+        )
+        previewChord(chordId)
     }
 
-    fun setChordDuration(chordId: Long, value: NoteValue) {
-        edit("Set chord length") { CompositionEditor.setChordDuration(it, chordId, value.ticks) }
+    fun cancelEditChord() {
+        _state.value = _state.value.copy(
+            chordEditor = _state.value.chordEditor.copy(editingChordId = null),
+        )
+    }
+
+    /** Move a chord one place earlier or later in the progression. */
+    fun nudgeChord(chordId: Long, delta: Int) {
+        edit(if (delta < 0) "Move chord earlier" else "Move chord later") {
+            CompositionEditor.nudgeChord(it, chordId, delta)
+        }
+    }
+
+    fun duplicateChord(chordId: Long) {
+        edit("Duplicate chord", rebuildBuses = true) {
+            CompositionEditor.duplicateChord(it, chordId)
+        }
+    }
+
+    fun doubleChordLength(chordId: Long) {
+        edit("Lengthen chord") { CompositionEditor.doubleChordLength(it, chordId) }
+    }
+
+    fun halveChordLength(chordId: Long) {
+        edit("Shorten chord") { CompositionEditor.halveChordLength(it, chordId) }
+    }
+
+    fun setChordDurationTicks(chordId: Long, ticks: Int) {
+        edit("Set chord length") { CompositionEditor.setChordDuration(it, chordId, ticks) }
+    }
+
+    fun removeChord(chordId: Long) {
+        edit("Remove chord", rebuildBuses = true) { CompositionEditor.removeChord(it, chordId) }
     }
 
     fun setChordStrum(chordId: Long, strum: StrumPattern) {
@@ -1288,7 +1441,9 @@ class StudioViewModel(
             },
             sampleRate = engine.engineSampleRate,
             fromTick = fromTick,
-            toTick = state.loop?.endTick,
+            // The schedule is never truncated at the loop end: the engine wraps by frame,
+            // so the loop can be widened mid-playback without rebuilding.
+            toTick = null,
             countInBars = countInBars,
             metronome = metronome,
             metronomeLevel = state.metronomeLevel,
@@ -1297,18 +1452,86 @@ class StudioViewModel(
         PlaybackServiceController.start(getApplication())
     }
 
-    fun setLoop(region: LoopRegion?) {
-        _state.value = _state.value.copy(loop = region)
+    /**
+     * Set the loop region directly.
+     *
+     * Changing the loop while the transport is running restarts playback at the new
+     * region. The alternative — leaving the playhead wherever it happens to be, possibly
+     * outside the new loop — is confusing, and the schedule is built relative to the loop
+     * start, so restarting is also the honest way to apply it.
+     */
+    fun setLoop(region: LoopRegion?, scope: LoopScope = LoopScope.OFF) {
+        val wasPlaying = _state.value.isPlaying
+        _state.value = _state.value.copy(
+            loop = region,
+            loopScope = if (region == null) LoopScope.OFF else scope,
+        )
         engine.setLoop(region)
+        if (wasPlaying) {
+            playInternal(
+                fromTick = region?.startTick ?: 0L,
+                metronome = _state.value.metronomeEnabled,
+                countInBars = 0,
+                includeTracks = true,
+            )
+        }
     }
 
-    /** Loop the bar the playhead is in, the most common looping gesture. */
-    fun loopCurrentBar() {
+    /** Apply a loop scope, working out the region from the music and the playhead. */
+    fun setLoopScope(scope: LoopScope) {
         val state = _state.value
-        val bar = state.playback.tick / state.composition.timeSignature.barTicks
-        val start = bar * state.composition.timeSignature.barTicks
-        setLoop(LoopRegion(start, start + state.composition.timeSignature.barTicks))
+        val ts = state.composition.timeSignature
+        val bar = ts.barTicks.toLong()
+
+        val region = when (scope) {
+            LoopScope.OFF -> null
+
+            // The whole section: every bar that contains music, rounded out to bar lines
+            // so the loop seam lands on a downbeat.
+            LoopScope.WHOLE -> {
+                val end = state.composition.endTick
+                if (end <= 0L) {
+                    LoopRegion(0L, bar)
+                } else {
+                    LoopRegion(0L, ((end + bar - 1) / bar) * bar)
+                }
+            }
+
+            LoopScope.CURRENT_BAR -> {
+                val start = (state.playback.tick / bar) * bar
+                LoopRegion(start, start + bar)
+            }
+
+            LoopScope.TWO_BARS -> {
+                val start = (state.playback.tick / bar) * bar
+                LoopRegion(start, start + bar * 2)
+            }
+
+            LoopScope.FOUR_BARS -> {
+                val start = (state.playback.tick / bar) * bar
+                LoopRegion(start, start + bar * 4)
+            }
+
+            // The selection, rounded out to whole bars so it still loops musically.
+            LoopScope.SELECTION -> {
+                val notes = state.selectedNotes
+                if (notes.isEmpty()) {
+                    emit("Select some notes to loop them")
+                    return
+                }
+                val from = (notes.minOf { it.startTick } / bar) * bar
+                val to = ((notes.maxOf { it.endTick } + bar - 1) / bar) * bar
+                LoopRegion(from, maxOf(to, from + bar))
+            }
+        }
+        setLoop(region, scope)
     }
+
+    /** Loop the whole section: the quickest way to hear an arrangement round and round. */
+    fun loopWholeSection() = setLoopScope(LoopScope.WHOLE)
+
+    /** Loop the bar the playhead is in. */
+    fun loopCurrentBar() = setLoopScope(LoopScope.CURRENT_BAR)
 
     fun seekTo(tick: Long) = engine.seekToTick(tick)
 

@@ -721,6 +721,119 @@ object CompositionEditor {
 
     // ------------------------------------------------------------------ chords
 
+    /**
+     * A length a chord can be given, measured in the project's own metre.
+     *
+     * Chord length used to be chosen from note values, which is wrong: a whole note
+     * equals a bar only in 4/4. In 2/4 a "whole note" chord lasts exactly twice as long
+     * as the bar, and in 3/4 or 6/8 it lasts one and a third bars. Bars and beats are
+     * what a chord is actually counted in, so that is what is offered.
+     */
+    data class ChordLength(val label: String, val ticks: Int)
+
+    /**
+     * The chord lengths offered for [ts], shortest first.
+     *
+     * Beats are *felt* beats, so a beat in 6/8 is a dotted quarter rather than an eighth,
+     * which is how the metre is actually counted. Where a beat count and a bar count come
+     * to the same length — two beats is a whole bar in 2/4, and in 6/8 — the bar label
+     * wins, because "1 bar" is what a player means.
+     */
+    fun chordLengthOptions(ts: TimeSignature): List<ChordLength> {
+        // Ticks to label, bars inserted first so they take precedence on a collision.
+        val byTicks = LinkedHashMap<Int, String>()
+        for (bars in listOf(1, 2, 4, 8)) {
+            byTicks[ts.barTicks * bars] = if (bars == 1) "1 bar" else "$bars bars"
+        }
+        for (beats in 1 until ts.pulsesPerBar.coerceAtMost(5)) {
+            val ticks = ts.pulseTicks * beats
+            if (ticks < ts.barTicks) {
+                byTicks.putIfAbsent(ticks, if (beats == 1) "1 beat" else "$beats beats")
+            }
+        }
+        // Half a bar is only worth offering when it is not already a whole beat count,
+        // which is the case in irregular metres such as 7/8.
+        val half = ts.barTicks / 2
+        if (half > 0) byTicks.putIfAbsent(half, "\u00BD bar")
+
+        return byTicks.entries
+            .sortedBy { it.key }
+            .map { ChordLength(it.value, it.key) }
+    }
+
+    /** The label for an arbitrary chord length in [ts], e.g. "2 bars" or "3 beats". */
+    fun describeChordLength(ticks: Int, ts: TimeSignature): String {
+        chordLengthOptions(ts).firstOrNull { it.ticks == ticks }?.let { return it.label }
+        if (ticks % ts.barTicks == 0) {
+            val bars = ticks / ts.barTicks
+            return if (bars == 1) "1 bar" else "$bars bars"
+        }
+        if (ticks % ts.pulseTicks == 0) {
+            val beats = ticks / ts.pulseTicks
+            return if (beats == 1) "1 beat" else "$beats beats"
+        }
+        return NoteValue.forTicks(ticks).displayName
+    }
+
+    /** Double a chord's length, up to a sane maximum of sixteen bars. */
+    fun doubleChordLength(composition: Composition, chordId: Long): Composition {
+        val event = composition.chordProgression.firstOrNull { it.id == chordId } ?: return composition
+        val limit = composition.timeSignature.barTicks * 16
+        return setChordDuration(composition, chordId, (event.durationTicks * 2).coerceAtMost(limit))
+    }
+
+    /** Halve a chord's length, down to a sixteenth note. */
+    fun halveChordLength(composition: Composition, chordId: Long): Composition {
+        val event = composition.chordProgression.firstOrNull { it.id == chordId } ?: return composition
+        return setChordDuration(composition, chordId, (event.durationTicks / 2).coerceAtLeast(Ticks.SIXTEENTH))
+    }
+
+    /** Replace a chord in place, keeping its position in the progression. */
+    fun replaceChord(
+        composition: Composition,
+        chordId: Long,
+        chord: Chord,
+        durationTicks: Int,
+        strum: StrumPattern,
+        voicing: ChordVoicing?,
+    ): Composition {
+        val board = composition.activeTrack?.fretboard
+        return reflowChords(
+            composition.copy(
+                chordProgression = composition.chordProgression.map { event ->
+                    if (event.id != chordId) {
+                        event
+                    } else {
+                        event.copy(
+                            chord = chord,
+                            durationTicks = durationTicks.coerceAtLeast(1),
+                            strum = strum,
+                            voicing = voicing ?: board?.let { ChordVoicer.bestVoicing(chord, it) },
+                        )
+                    }
+                },
+            ),
+        )
+    }
+
+    /** Insert a copy of a chord straight after it. */
+    fun duplicateChord(composition: Composition, chordId: Long): Composition {
+        val index = composition.chordProgression.indexOfFirst { it.id == chordId }
+        if (index < 0) return composition
+        val source = composition.chordProgression[index]
+        val (id, withId) = composition.allocateId()
+        val list = withId.chordProgression.toMutableList()
+        list.add(index + 1, source.copy(id = id))
+        return reflowChords(withId.copy(chordProgression = list))
+    }
+
+    /** Move a chord one place earlier or later in the progression. */
+    fun nudgeChord(composition: Composition, chordId: Long, delta: Int): Composition {
+        val index = composition.chordProgression.indexOfFirst { it.id == chordId }
+        if (index < 0) return composition
+        return moveChord(composition, chordId, index + delta)
+    }
+
     /** Append a chord to the progression, after whatever is already there. */
     fun appendChord(
         composition: Composition,

@@ -23,11 +23,17 @@ import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -36,6 +42,7 @@ import com.tabtap.app.design.LocalSpacing
 import com.tabtap.app.design.LocalTabTapColors
 import com.tabtap.app.design.MonoType
 import com.tabtap.app.design.MusicColors
+import com.tabtap.app.LoopScope
 import com.tabtap.app.SaveState
 import com.tabtap.app.ui.components.IconToggle
 import com.tabtap.app.ui.components.Stepper
@@ -59,6 +66,8 @@ fun TransportBar(
     timeSignature: TimeSignature,
     metronomeEnabled: Boolean,
     looping: Boolean,
+    /** The loop's extent, for the readout; null when not looping. */
+    loopLabel: String? = null,
     canUndo: Boolean,
     canRedo: Boolean,
     saveState: SaveState,
@@ -69,6 +78,8 @@ fun TransportBar(
     onRestart: () -> Unit,
     onToggleMetronome: () -> Unit,
     onToggleLoop: () -> Unit,
+    /** Choose what the loop covers. Null keeps the simple toggle only. */
+    onChooseLoop: ((LoopScope) -> Unit)? = null,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
     onTempoChange: (Double) -> Unit,
@@ -133,10 +144,35 @@ fun TransportBar(
                     IconToggle(Icons.Default.Replay, "Back to start", onClick = onRestart)
                 }
                 if (showLoopAndClick) {
-                    IconToggle(
-                        Icons.Default.Loop, "Loop",
-                        checked = looping, onClick = onToggleLoop,
-                    )
+                    // Tapping sets the loop; the menu chooses what it covers, because
+                    // looping the whole section is as common as looping one bar.
+                    Box {
+                        var loopMenuOpen by remember { mutableStateOf(false) }
+                        IconToggle(
+                            Icons.Default.Loop,
+                            if (looping) "Loop: ${loopLabel ?: "on"}" else "Loop",
+                            checked = looping,
+                            onClick = {
+                                if (onChooseLoop == null) onToggleLoop() else loopMenuOpen = true
+                            },
+                        )
+                        if (onChooseLoop != null) {
+                            DropdownMenu(
+                                expanded = loopMenuOpen,
+                                onDismissRequest = { loopMenuOpen = false },
+                            ) {
+                                for (scope in LoopScope.entries) {
+                                    DropdownMenuItem(
+                                        text = { Text(scope.label) },
+                                        onClick = {
+                                            loopMenuOpen = false
+                                            onChooseLoop(scope)
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
                     IconToggle(
                         Icons.Default.GraphicEq, "Metronome",
                         checked = metronomeEnabled,
@@ -177,9 +213,14 @@ fun TransportBar(
                     )
                     if (showLoopAndClick) {
                         Text(
-                            "bar . beat",
+                            if (looping && loopLabel != null) "loop: $loopLabel" else "bar . beat",
                             style = MaterialTheme.typography.labelSmall,
-                            color = colors.textTertiary,
+                            color = if (looping) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                colors.textTertiary
+                            },
+                            maxLines = 1,
                         )
                     }
                 }

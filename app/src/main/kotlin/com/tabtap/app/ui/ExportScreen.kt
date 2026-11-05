@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
@@ -77,6 +78,35 @@ fun ExportScreen(
     var pdfAllTracks by remember { mutableStateOf(true) }
     var lastResult by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    // Which parts to export. Starts as all of them; narrowing it is how you save a
+    // generated harmony as its own tab, MIDI or PDF.
+    var selectedTracks by remember(state.projectId, state.composition.tracks.size) {
+        mutableStateOf(state.composition.tracks.map { it.id }.toSet())
+    }
+
+    /**
+     * The composition as it will be exported.
+     *
+     * Narrowing the track list here rather than inside each exporter means every format
+     * honours the choice identically, and the chord progression is dropped with the
+     * chord track so a harmony-only export really is harmony only.
+     */
+    val exported = remember(state.composition, selectedTracks, includeChords) {
+        val tracks = state.composition.tracks.filter { it.id in selectedTracks }
+        state.composition.copy(
+            tracks = tracks.ifEmpty { state.composition.tracks },
+            activeTrackId = tracks.firstOrNull()?.id ?: state.composition.activeTrackId,
+            chordProgression = if (includeChords) state.composition.chordProgression else emptyList(),
+        )
+    }
+    val exportTitle = remember(state.projectName, selectedTracks, state.composition.tracks) {
+        val tracks = state.composition.tracks.filter { it.id in selectedTracks }
+        if (tracks.size == 1 && state.composition.tracks.size > 1) {
+            "${state.projectName} - ${tracks.single().name}"
+        } else {
+            state.projectName
+        }
+    }
 
     val createDocument = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument(format.mimeType),
@@ -87,9 +117,9 @@ fun ExportScreen(
             val result = FileExport.export(
                 context = context,
                 uri = uri,
-                composition = state.composition,
+                composition = exported,
                 format = format,
-                title = state.projectName,
+                title = exportTitle,
                 midiOptions = MidiExportOptions(
                     includeMetronome = includeMetronome,
                     includeChordTrack = includeChords,
@@ -99,7 +129,7 @@ fun ExportScreen(
                     includeNotation = pdfNotation,
                     includeTablature = pdfTab,
                     allTracks = pdfAllTracks,
-                    title = state.projectName,
+                    title = exportTitle,
                 ),
             )
             busy = false
@@ -251,7 +281,7 @@ fun ExportScreen(
         Button(
             onClick = {
                 lastResult = null
-                createDocument.launch(FileExport.fileName(state.projectName, format))
+                createDocument.launch(FileExport.fileName(exportTitle, format))
             },
             enabled = !busy,
             modifier = Modifier.fillMaxWidth().height(52.dp),

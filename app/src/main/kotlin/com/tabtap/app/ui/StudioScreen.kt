@@ -19,11 +19,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Undo
@@ -134,6 +136,7 @@ fun StudioScreen(
                 timeSignature = state.composition.timeSignature,
                 metronomeEnabled = state.metronomeEnabled,
                 looping = state.loop != null,
+                loopLabel = state.loopLabel,
                 canUndo = state.canUndo,
                 canRedo = state.canRedo,
                 saveState = state.saveState,
@@ -143,8 +146,9 @@ fun StudioScreen(
                 onRestart = model::restart,
                 onToggleMetronome = { model.setMetronomeEnabled(!state.metronomeEnabled) },
                 onToggleLoop = {
-                    if (state.loop != null) model.setLoop(null) else model.loopCurrentBar()
+                    if (state.loop != null) model.setLoop(null) else model.loopWholeSection()
                 },
+                onChooseLoop = model::setLoopScope,
                 onUndo = model::undo,
                 onRedo = model::redo,
                 onTempoChange = model::setTempo,
@@ -220,21 +224,7 @@ fun StudioScreen(
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         when (state.pane) {
                             StudioPane.FRETBOARD -> SequenceList(model, state)
-                            StudioPane.TAB -> TabPane(
-                                track = track,
-                                timeSignature = state.composition.timeSignature,
-                                chordProgression = state.composition.chordProgression,
-                                selectedNoteIds = state.selectedNoteIds,
-                                playheadTick = state.playback.tick.takeIf { state.isPlaying },
-                                minMeasures = state.composition.barCount,
-                                onSelectNote = { id, additive ->
-                                    if (additive) model.toggleSelection(id) else model.setSelection(setOf(id))
-                                },
-                                onAddNote = { string, fret, tick ->
-                                    model.addNoteAt(string, fret, tick, state.entryValue.ticks)
-                                },
-                                onAdjustNote = { id, delta -> model.transposeNote(id, delta) },
-                            )
+                            StudioPane.TAB -> TabStack(model, state)
                             StudioPane.PIANO_ROLL -> PianoRollPane(
                                 composition = state.composition,
                                 track = track,
@@ -387,7 +377,107 @@ private fun EntryToolbar(
     }
 }
 
-/** The ordered list of entered notes, with their analysis against the key. */
+/**
+ * The tablature pane.
+ *
+ * Every part can be shown at once, each on its own tab staff — which is how a harmonised
+ * arrangement is actually read, and the quickest way to check a generated harmony against
+ * the line it came from. Tapping a staff makes that track the one being edited.
+ */
+@Composable
+private fun TabStack(model: StudioViewModel, state: StudioUiState) {
+    val spacing = LocalSpacing.current
+    val colors = LocalTabTapColors.current
+    val active = state.activeTrack ?: return
+    val tracks = if (state.showAllTabs) state.composition.tracks else listOf(active)
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = spacing.small, vertical = spacing.tiny),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SectionLabel(
+                if (state.showAllTabs) "All parts" else active.name,
+                Modifier.weight(1f),
+            )
+            TabTapChip(
+                text = if (state.showAllTabs) "One part" else "All parts",
+                selected = state.showAllTabs,
+                onClick = { model.setShowAllTabs(!state.showAllTabs) },
+            )
+        }
+        HairlineDivider()
+        Column(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState()),
+        ) {
+            for (t in tracks) {
+                if (tracks.size > 1) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { model.setActiveTrack(t.id) }
+                            .padding(horizontal = spacing.small, vertical = spacing.tiny),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TrackDot(MusicColors.forSlot(t.colorSlot), 8.dp)
+                        Spacer(Modifier.width(spacing.small))
+                        Text(
+                            t.name,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = if (t.id == active.id) {
+                                MaterialTheme.colorScheme.onSurface
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                        Spacer(Modifier.width(spacing.small))
+                        Text(
+                            "${t.tuning.displayName} \u00B7 ${t.notes.size} notes" +
+                                if (t.id == active.id) " \u00B7 editing" else "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textTertiary,
+                        )
+                    }
+                }
+                TabPane(
+                    track = t,
+                    timeSignature = state.composition.timeSignature,
+                    chordProgression = state.composition.chordProgression,
+                    selectedNoteIds = state.selectedNoteIds,
+                    playheadTick = state.playback.tick.takeIf { state.isPlaying },
+                    minMeasures = state.composition.barCount,
+                    onSelectNote = { id, additive ->
+                        if (t.id != active.id) model.setActiveTrack(t.id)
+                        if (additive) model.toggleSelection(id) else model.setSelection(setOf(id))
+                    },
+                    onAddNote = { string, fret, tick ->
+                        if (t.id != active.id) model.setActiveTrack(t.id)
+                        model.addNoteAt(string, fret, tick, state.entryValue.ticks)
+                    },
+                    onAdjustNote = { id, delta -> model.transposeNote(id, delta) },
+                )
+                Spacer(Modifier.height(spacing.small))
+            }
+            Spacer(Modifier.height(spacing.xLarge))
+        }
+    }
+}
+
+/**
+ * The ordered list of entered notes, with inline rhythm editing.
+ *
+ * Setting the rhythm after tapping a line out used to mean selecting notes and opening
+ * the inspector, which is too far away from the thing you just played. Every note's
+ * length is editable here in one tap, and the strip along the top sets the whole line or
+ * just the selection at once — so "tap the notes, then give them a rhythm" is two
+ * gestures rather than a hunt through panels.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SequenceList(model: StudioViewModel, state: StudioUiState) {
     val spacing = LocalSpacing.current
@@ -399,91 +489,167 @@ private fun SequenceList(model: StudioViewModel, state: StudioUiState) {
         EmptyState(
             "Tap the fretboard to begin",
             "Notes are recorded in the order you tap them. Two fingers at once makes a " +
-                "chord. When the line is there, give it a rhythm and generate a harmony.",
+                "chord. When the line is there, give it a rhythm below and generate a harmony.",
         )
         return
     }
 
     val analysis = remember(track, key) { CompositionAnalyzer.analyze(track, key) }
+    val quickValues = listOf(
+        NoteValue.WHOLE, NoteValue.HALF, NoteValue.DOTTED_QUARTER, NoteValue.QUARTER,
+        NoteValue.DOTTED_EIGHTH, NoteValue.EIGHTH, NoteValue.TRIPLET_EIGHTH,
+        NoteValue.SIXTEENTH,
+    )
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(spacing.small),
-    ) {
-        Row(Modifier.fillMaxWidth().padding(bottom = spacing.tiny)) {
-            SectionLabel("#", Modifier.width(28.dp))
-            SectionLabel("Note", Modifier.width(56.dp))
-            SectionLabel("Pos", Modifier.width(52.dp))
-            SectionLabel("Degree", Modifier.width(56.dp))
-            SectionLabel("Length", Modifier.weight(1f))
-        }
-        HairlineDivider()
-        analysis.forEachIndexed { index, item ->
-            val selected = item.note.id in state.selectedNoteIds
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .height(38.dp)
-                    .clickable {
-                        if (selected) {
-                            model.setSelection(state.selectedNoteIds - item.note.id)
-                        } else {
-                            model.setSelection(setOf(item.note.id))
-                        }
+    Column(Modifier.fillMaxSize()) {
+
+        // --- The rhythm strip: set the whole line, or just what is selected ---
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = spacing.small, vertical = spacing.tiny),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SectionLabel(
+                    if (state.hasSelection) {
+                        "Set ${state.selectedNoteIds.size} selected to"
+                    } else {
+                        "Set every note to"
                     },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "${index + 1}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.textTertiary,
-                    modifier = Modifier.width(28.dp),
+                    Modifier.weight(1f),
                 )
-                Row(Modifier.width(56.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TrackDot(MusicColors.forSlot(track.colorSlot), 7.dp)
-                    Spacer(Modifier.width(5.dp))
-                    Text(
-                        item.noteName,
-                        style = com.tabtap.app.design.MonoType.tab,
-                        color = MaterialTheme.colorScheme.onSurface,
+                if (state.hasSelection) {
+                    TabTapChip("Clear", onClick = model::clearSelection)
+                } else {
+                    TabTapChip("Select all", onClick = model::selectAll)
+                }
+            }
+            Spacer(Modifier.height(spacing.tiny))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(spacing.tiny),
+                verticalArrangement = Arrangement.spacedBy(spacing.tiny),
+            ) {
+                for (value in quickValues) {
+                    TabTapChip(
+                        text = valueLabel(value),
+                        onClick = {
+                            // With nothing selected this is the "assign a rhythm to what
+                            // I just tapped" gesture, which lays the whole line on an
+                            // even grid; with a selection it sets just those notes.
+                            if (state.hasSelection) {
+                                model.setSelectionDuration(value)
+                            } else {
+                                model.applyEvenRhythm(value)
+                            }
+                        },
                     )
                 }
-                Text(
-                    if (item.note.fret != null) {
-                        "s${(track.tuning.stringCount - (item.note.string ?: 0))}/${item.note.fret}"
-                    } else {
-                        "—"
-                    },
-                    style = com.tabtap.app.design.MonoType.tab,
-                    color = if (item.note.fret == null) {
-                        MusicColors.unplayable
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    modifier = Modifier.width(52.dp),
-                )
-                Text(
-                    item.degreeLabel,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (item.inKey) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        MusicColors.unplayable
-                    },
-                    modifier = Modifier.width(56.dp),
-                )
-                Text(
-                    item.note.noteValue.displayName,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.textTertiary,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                TabTapChip("Quantise", onClick = model::quantizeTrack)
+                TabTapChip("Legato", onClick = model::makeLegato)
+                TabTapChip("Rhythm\u2026", onClick = { model.setPane(StudioPane.FRETBOARD) })
+            }
+        }
+        HairlineDivider()
+
+        // --- The notes ---
+        Column(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = spacing.small),
+        ) {
+            Row(Modifier.fillMaxWidth().padding(vertical = spacing.tiny)) {
+                SectionLabel("#", Modifier.width(24.dp))
+                SectionLabel("Note", Modifier.width(52.dp))
+                SectionLabel("Pos", Modifier.width(48.dp))
+                SectionLabel("Deg", Modifier.width(40.dp))
+                SectionLabel("Length", Modifier.weight(1f))
             }
             HairlineDivider()
+            analysis.forEachIndexed { index, item ->
+                val selected = item.note.id in state.selectedNoteIds
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .clickable {
+                            if (selected) {
+                                model.setSelection(state.selectedNoteIds - item.note.id)
+                            } else {
+                                model.setSelection(state.selectedNoteIds + item.note.id)
+                            }
+                        },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "${index + 1}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            colors.textTertiary
+                        },
+                        modifier = Modifier.width(24.dp),
+                    )
+                    Row(Modifier.width(52.dp), verticalAlignment = Alignment.CenterVertically) {
+                        TrackDot(MusicColors.forSlot(track.colorSlot), 7.dp)
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            item.noteName,
+                            style = com.tabtap.app.design.MonoType.tab,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    Text(
+                        if (item.note.fret != null) {
+                            "s${(track.tuning.stringCount - (item.note.string ?: 0))}/${item.note.fret}"
+                        } else {
+                            "\u2014"
+                        },
+                        style = com.tabtap.app.design.MonoType.tab,
+                        color = if (item.note.fret == null) {
+                            MusicColors.unplayable
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.width(48.dp),
+                    )
+                    Text(
+                        item.degreeLabel,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (item.inKey) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MusicColors.unplayable
+                        },
+                        modifier = Modifier.width(40.dp),
+                    )
+                    // Inline length editing: shorter, the value itself, longer.
+                    Row(
+                        Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconToggle(
+                            Icons.Default.Remove, "Shorten note ${index + 1}", size = 34.dp,
+                        ) { model.halveNoteLength(item.note.id) }
+                        Text(
+                            valueLabel(item.note.noteValue),
+                            style = com.tabtap.app.design.MonoType.tab,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.width(44.dp),
+                        )
+                        IconToggle(
+                            Icons.Default.Add, "Lengthen note ${index + 1}", size = 34.dp,
+                        ) { model.doubleNoteLength(item.note.id) }
+                        IconToggle(
+                            Icons.Default.PlayArrow, "Hear note ${index + 1}", size = 34.dp,
+                        ) { model.auditionNote(item.note.id) }
+                    }
+                }
+                HairlineDivider()
+            }
+            Spacer(Modifier.height(spacing.xLarge))
         }
     }
 }

@@ -21,8 +21,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -40,6 +44,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,6 +63,7 @@ import com.tabtap.app.ui.components.SectionLabel
 import com.tabtap.app.ui.components.SegmentedControl
 import com.tabtap.app.ui.components.TabTapChip
 import com.tabtap.app.ui.panels.valueLabel
+import com.tabtap.app.editing.CompositionEditor
 import com.tabtap.music.Chord
 import com.tabtap.music.ChordType
 import com.tabtap.music.ChordVoicing
@@ -268,21 +274,42 @@ fun ChordsScreen(
                 Spacer(Modifier.height(spacing.medium))
                 SectionLabel("Length")
                 Spacer(Modifier.height(spacing.tiny))
+                val lengths = remember(state.composition.timeSignature) {
+                    CompositionEditor.chordLengthOptions(state.composition.timeSignature)
+                }
+                val currentLength = editor.durationTicks.takeIf { it > 0 }
+                    ?: state.composition.timeSignature.barTicks
                 ChipRow(
-                    items = listOf(
-                        NoteValue.WHOLE, NoteValue.DOTTED_HALF, NoteValue.HALF,
-                        NoteValue.DOTTED_QUARTER, NoteValue.QUARTER, NoteValue.EIGHTH,
-                    ),
-                    isSelected = { it == editor.durationValue },
-                    onSelect = { model.setChordEditor(editor.copy(durationValue = it)) },
-                    label = { valueLabel(it) },
+                    items = lengths,
+                    isSelected = { it.ticks == currentLength },
+                    onSelect = { model.setChordEditor(editor.copy(durationTicks = it.ticks)) },
+                    label = { it.label },
                 )
+                Spacer(Modifier.height(spacing.tiny))
+                Text(
+                    "Measured in bars and beats of ${state.composition.timeSignature}, so a " +
+                        "chord lasts what it says whatever the metre.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textTertiary,
+                )
+
                 Spacer(Modifier.height(spacing.medium))
-                Button(
-                    onClick = model::addChordToProgression,
-                    enabled = chord != null,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Add ${chord?.symbol ?: "chord"} to the progression") }
+                if (editor.isEditing) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(spacing.small)) {
+                        Button(
+                            onClick = model::addChordToProgression,
+                            enabled = chord != null,
+                            modifier = Modifier.weight(1f),
+                        ) { Text("Update ${chord?.symbol ?: "chord"}") }
+                        OutlinedButton(onClick = model::cancelEditChord) { Text("Cancel") }
+                    }
+                } else {
+                    Button(
+                        onClick = model::addChordToProgression,
+                        enabled = chord != null,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Add ${chord?.symbol ?: "chord"} to the progression") }
+                }
             }
         }
 
@@ -358,47 +385,131 @@ fun ChordsScreen(
                 )
             } else {
                 Column {
-                    for ((index, event) in state.composition.chordProgression.withIndex()) {
-                        Row(
+                    val progression = state.composition.chordProgression
+                    for ((index, event) in progression.withIndex()) {
+                        val isEditing = event.id == editor.editingChordId
+                        Column(
                             Modifier
                                 .fillMaxWidth()
-                                .height(52.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                                .padding(vertical = spacing.tiny),
                         ) {
-                            Text(
-                                "${index + 1}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = colors.textTertiary,
-                                modifier = Modifier.width(26.dp),
-                            )
-                            Text(
-                                event.chord.symbol,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MusicColors.chord,
-                                modifier = Modifier.width(80.dp),
-                            )
-                            Column(Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    event.voicing?.tabString() ?: "auto",
-                                    style = MonoType.tab,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                Text(
-                                    "${event.strum.displayName} · ${
-                                        com.tabtap.music.NoteValue.forTicks(event.durationTicks).displayName
-                                    }",
+                                    "${index + 1}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = colors.textTertiary,
+                                    modifier = Modifier.width(24.dp),
                                 )
+                                Column(
+                                    Modifier
+                                        .weight(1f)
+                                        .clickable { model.beginEditChord(event.id) },
+                                ) {
+                                    Text(
+                                        event.chord.symbol,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = if (isEditing) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MusicColors.chord
+                                        },
+                                    )
+                                    Text(
+                                        buildString {
+                                            append(
+                                                CompositionEditor.describeChordLength(
+                                                    event.durationTicks,
+                                                    state.composition.timeSignature,
+                                                ),
+                                            )
+                                            append(" \u00B7 ")
+                                            append(event.strum.displayName)
+                                            append(" \u00B7 ")
+                                            append(event.voicing?.tabString() ?: "auto")
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = colors.textTertiary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                // Reorder.
+                                IconToggle(
+                                    Icons.Default.KeyboardArrowUp, "Move ${event.chord.symbol} earlier",
+                                    enabled = index > 0, size = 38.dp,
+                                ) { model.nudgeChord(event.id, -1) }
+                                IconToggle(
+                                    Icons.Default.KeyboardArrowDown, "Move ${event.chord.symbol} later",
+                                    enabled = index < progression.lastIndex, size = 38.dp,
+                                ) { model.nudgeChord(event.id, 1) }
+                                IconToggle(
+                                    Icons.Default.PlayArrow, "Hear ${event.chord.symbol}", size = 38.dp,
+                                ) { model.previewChord(event.id) }
+                                IconToggle(
+                                    Icons.Default.Delete, "Remove ${event.chord.symbol}", size = 38.dp,
+                                ) { model.removeChord(event.id) }
                             }
-                            IconToggle(Icons.Default.PlayArrow, "Hear ${event.chord.symbol}") {
-                                model.previewChord(event.id)
+
+                            // Length and arrangement controls for this chord.
+                            Row(
+                                Modifier.padding(start = 24.dp, top = spacing.tiny),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                IconToggle(
+                                    Icons.Default.Remove, "Halve ${event.chord.symbol}", size = 34.dp,
+                                ) { model.halveChordLength(event.id) }
+                                IconToggle(
+                                    Icons.Default.Add, "Double ${event.chord.symbol}", size = 34.dp,
+                                ) { model.doubleChordLength(event.id) }
+                                Spacer(Modifier.width(spacing.small))
+                                TabTapChip("Edit", selected = isEditing) {
+                                    model.beginEditChord(event.id)
+                                }
+                                Spacer(Modifier.width(spacing.tiny))
+                                TabTapChip("Repeat") { model.duplicateChord(event.id) }
                             }
-                            IconToggle(Icons.Default.Delete, "Remove ${event.chord.symbol}") {
-                                model.removeChord(event.id)
-                            }
+
+                            Spacer(Modifier.height(spacing.tiny))
+                            // The strum, changeable in place.
+                            ChipRow(
+                                items = StrumPattern.entries.toList(),
+                                isSelected = { it == event.strum },
+                                onSelect = { model.setChordStrum(event.id, it) },
+                                label = { it.displayName },
+                                modifier = Modifier.padding(start = 24.dp),
+                            )
+                            Spacer(Modifier.height(spacing.small))
+                            // And its length, in the project's own metre.
+                            ChipRow(
+                                items = remember(state.composition.timeSignature) {
+                                    CompositionEditor.chordLengthOptions(
+                                        state.composition.timeSignature,
+                                    )
+                                },
+                                isSelected = { it.ticks == event.durationTicks },
+                                onSelect = { model.setChordDurationTicks(event.id, it.ticks) },
+                                label = { it.label },
+                                modifier = Modifier.padding(start = 24.dp),
+                            )
+                            Spacer(Modifier.height(spacing.small))
+                            com.tabtap.app.ui.components.HairlineDivider()
                         }
-                        com.tabtap.app.ui.components.HairlineDivider()
+                    }
+
+                    Spacer(Modifier.height(spacing.small))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Total: ${
+                                CompositionEditor.describeChordLength(
+                                    progression.sumOf { it.durationTicks },
+                                    state.composition.timeSignature,
+                                )
+                            }",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textTertiary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        OutlinedButton(onClick = model::loopWholeSection) { Text("Loop it") }
                     }
                 }
             }
