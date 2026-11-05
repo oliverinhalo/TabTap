@@ -221,10 +221,45 @@ data class Track(
         notes.filter { it.startTick < to && it.endTick > from }
 
     /**
-     * Recompute string/fret for every note against the current tuning, so a tuning
+     * Fill in a fretted position for any note that has none, leaving every existing
+     * position alone.
+     *
+     * This is what loading, importing and repairing use: a fingering the player chose —
+     * an awkward high position picked on purpose, say — must survive a round trip
+     * through a file, so only genuinely missing positions are computed.
+     */
+    fun withPositionsFilled(): Track {
+        val board = fretboard
+        var anchor = notes.firstOrNull { it.fret != null }?.fret ?: Fretboard.DEFAULT_ANCHOR_FRET
+        var changed = false
+        val updated = notes.map { n ->
+            val valid = n.string != null && n.fret != null &&
+                n.string in 0 until tuning.stringCount && n.fret in 0..fretCount &&
+                tuning.openStrings[n.string] + n.fret == n.pitch
+            if (valid) {
+                anchor = n.fret!!
+                n
+            } else {
+                changed = true
+                val pos = board.bestPositionFor(n.pitch, anchor, n.string)
+                if (pos != null) {
+                    anchor = pos.fret
+                    n.copy(string = pos.string, fret = pos.fret)
+                } else {
+                    n.copy(string = null, fret = null)
+                }
+            }
+        }
+        return if (changed) copy(notes = updated) else this
+    }
+
+    /**
+     * Recompute string/fret for *every* note against the current tuning, so a tuning
      * change keeps the pitches and only moves the fingerings. Notes that no longer fit
      * on the board keep their pitch and lose their position, and are reported by
      * [unplayableNotes].
+     *
+     * Use [withPositionsFilled] when loading or importing, which preserves fingerings.
      */
     fun refretted(): Track {
         val board = fretboard
@@ -521,7 +556,7 @@ data class Composition(
                     startTick = note.startTick.coerceAtLeast(0),
                 )
             }
-            t.copy(id = tid, notes = fixedNotes.sortedWith(Track.NOTE_ORDER)).refretted()
+            t.copy(id = tid, notes = fixedNotes.sortedWith(Track.NOTE_ORDER)).withPositionsFilled()
         }
         return copy(
             tracks = fixedTracks,
