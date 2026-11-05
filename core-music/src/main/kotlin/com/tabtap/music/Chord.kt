@@ -180,13 +180,18 @@ data class ChordVoicing(
             return if (fretted.isEmpty()) 0 else fretted.max() - fretted.min()
         }
 
-    /** Whether the shape needs a barre (two or more strings at the lowest fretted fret). */
+    /**
+     * Whether the shape needs a barre: two or more *adjacent* strings stopped at the
+     * lowest fretted fret. Adjacency matters — D major (xx0232) has two notes at the
+     * second fret but they are a string apart, so they take two fingers, not a barre.
+     */
     val isBarre: Boolean
         get() {
-            val fretted = frets.filterNotNull().filter { it > 0 }
+            val fretted = frets.withIndex().filter { it.value != null && it.value!! > 0 }
             if (fretted.size < 2) return false
-            val min = fretted.min()
-            return fretted.count { it == min } >= 2
+            val min = fretted.minOf { it.value!! }
+            val atMin = fretted.filter { it.value == min }.map { it.index }
+            return atMin.zipWithNext().any { (a, b) -> b - a == 1 }
         }
 
     /** Sounding pitches of this voicing on [board], low to high. */
