@@ -1,0 +1,99 @@
+name: Release
+
+# Pushing a v* tag builds, tests, signs and publishes a release with the APKs
+# attached. This is how the installable build reaches GitHub Releases.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v1.2)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, sign and publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run the tests
+        run: ./gradlew --no-daemon :core-music:test :core-io:test :app:testDebugUnitTest
+
+      - name: Build the APKs
+        run: ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease
+
+      # Signing is optional. With a keystore in the repository secrets the release APK
+      # is signed and installs as an update over previous builds; without one the job
+      # still publishes, and the debug APK is the installable artifact. That way a
+      # release never fails just because the secrets have not been set up.
+      - name: Work out whether we can sign
+        id: signing
+        run: |
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No signing keystore in secrets; publishing the unsigned release APK and the debug APK."
+          fi
+
+      - name: Sign the release APK
+        if: steps.signing.outputs.available == 'true'
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
+          BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          mkdir -p dist
+          "$BUILD_TOOLS/zipalign" -p -f 4 \
+            app/build/outputs/apk/release/app-release-unsigned.apk \
+            "dist/TabTap-${GITHUB_REF_NAME#v}-release.apk"
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks "$RUNNER_TEMP/release.jks" \
+            --ks-pass "pass:$KEYSTORE_PASSWORD" \
+            --key-pass "pass:$KEY_PASSWORD" \
+            --ks-key-alias "$KEY_ALIAS" \
+            "dist/TabTap-${GITHUB_REF_NAME#v}-release.apk"
+          "$BUILD_TOOLS/apksigner" verify "dist/TabTap-${GITHUB_REF_NAME#v}-release.apk"
+          rm -f "$RUNNER_TEMP/release.jks" dist/*.idsig
+
+      - name: Collect the APKs
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/TabTap-$VERSION-debug.apk"
+          if [ ! -f "dist/TabTap-$VERSION-release.apk" ]; then
+            cp app/build/outputs/apk/release/app-release-unsigned.apk \
+               "dist/TabTap-$VERSION-release-unsigned.apk"
+          fi
+          ls -la dist/
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: TabTap ${{ github.ref_name }}
+          generate_release_notes: true
+          files: dist/*.apk
+          body: |
+            Install the **release** APK. The debug APK is a fallback with readable
+            stack traces if something crashes.
+
+            ${{ steps.signing.outputs.available == 'true' && 'The release APK is signed and installs as an update over earlier builds.' || 'No signing keystore is configured in this repository''s secrets, so the release APK here is **unsigned and cannot be installed directly** — use the debug APK, or add the secrets described in the README to get a signed one.' }}

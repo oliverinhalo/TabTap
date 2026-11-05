@@ -63,6 +63,33 @@ Requires a JDK 17 or newer and an Android SDK with platform 35. Point `sdk.dir` 
 
 `./gradlew check` runs everything that does not need a device.
 
+## Releases
+
+Pushing a `v*` tag runs the tests, builds the app and publishes a GitHub Release with
+the APKs attached. Install the **release** APK; the debug one is a fallback with readable
+stack traces.
+
+For the released APK to be installable it has to be signed, which needs four repository
+secrets (Settings → Secrets and variables → Actions). Without them the workflow still
+publishes, but the release APK is unsigned and only the debug APK can be installed.
+
+| Secret | What it is |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | Your keystore, base64 encoded: `base64 -w0 release.jks` |
+| `ANDROID_KEYSTORE_PASSWORD` | The keystore password |
+| `ANDROID_KEY_ALIAS` | The key alias inside the keystore |
+| `ANDROID_KEY_PASSWORD` | The key password |
+
+To create a keystore:
+
+```
+keytool -genkeypair -keystore release.jks -alias tabtap \
+  -keyalg RSA -keysize 4096 -validity 10950
+```
+
+Keep that file. Android requires every update to be signed with the same key as the
+install, so losing it means uninstalling before you can update.
+
 ## Architecture
 
 | Module | Platform | Contents |
