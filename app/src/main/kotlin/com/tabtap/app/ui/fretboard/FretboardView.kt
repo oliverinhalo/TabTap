@@ -7,7 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -110,15 +110,26 @@ fun FretboardView(
             .padding(1.dp),
     ) {
         val stringCount = fretboard.stringCount
-        // Give each string a comfortable touch target, and let the board grow with the
-        // string count so an 8-string is as playable as a 4-string bass.
-        val minHeight: Dp = (stringCount * 44 + 46).dp
+        // The board fills whatever space it is given and divides it between the strings.
+        //
+        // It used to demand a comfortable 44dp per string, which on a six-string came to
+        // 310dp — more than the whole height of a phone in landscape once a transport bar
+        // was above it. Everything below the fretboard was then pushed off the screen and
+        // could not be reached at all. Filling the available space instead, down to a
+        // floor that is still hittable, is the only arrangement that works in landscape.
+        val availableHeight = maxHeight
+        val comfortable: Dp = (stringCount * 44 + 46).dp
+        val floor: Dp = (stringCount * 22 + 26).dp
+        val height: Dp = when {
+            availableHeight.value <= 0f -> comfortable
+            availableHeight >= comfortable -> availableHeight
+            else -> maxOf(availableHeight, floor)
+        }
 
         Box(
             Modifier
                 .fillMaxWidth()
-                .heightIn(min = minHeight)
-                .fillMaxSize()
+                .height(height)
                 .pointerInput(fretboard, display.leftHanded) {
                     // Multi-touch note entry: the first finger down starts a note, and
                     // any finger that arrives while another is still down is treated as

@@ -27,24 +27,28 @@ object Help {
         title = "Making a harmonised song",
         summary = "The whole workflow, in the order you would actually do it.",
         steps = listOf(
-            "Tap notes on the fretboard. They record in the order you tap them, so tap " +
-                "the line as you would play it. Two fingers at once makes a chord.",
-            "Give the line a rhythm. Under the fretboard, every note has a length you can " +
-                "change, and the strip at the top sets them all at once — tap 1/8 and the " +
-                "whole line becomes eighth notes.",
-            "Set the key. Tap the key button (it shows something like \"E min\"). This " +
-                "never moves your notes; it tells the harmony which scale to follow.",
-            "Tap Harmonise. Pick an interval — a 3rd above is the classic twin-guitar " +
-                "sound — and it generates a second part that follows your line.",
-            "Choose what you want to hear with the Play along buttons: everything, or " +
-                "just the harmony so you can play the original yourself.",
-            "Add chords on the Chords screen if you want a backing underneath.",
-            "Export from the Export screen. You can export everything, or just one part.",
+            "**Play** — tap notes on the fretboard. They record in the order you tap " +
+                "them, so tap the line as you would play it. Two fingers at once makes a " +
+                "chord.",
+            "**Notes** — give the line a rhythm. Every note has a length you can change " +
+                "with its − and +, and the strip at the top sets them all at once: tap " +
+                "1/8 and the whole line becomes eighth notes.",
+            "**Setup** — set the key. This never moves your notes; it tells the harmony " +
+                "which scale to follow.",
+            "**Harmony** — tap Harmonise. Pick an interval, a 3rd above being the classic " +
+                "twin-guitar sound, and it generates a second part that follows your line.",
+            "**Harmony** — choose what you hear: everything, or just the harmony so you " +
+                "can play the original yourself.",
+            "**Chords** — add a backing underneath, if you want one.",
+            "**Tab** or **Score** — read the result. Both show every part.",
+            "**Export** — save it. Everything, or just one part.",
         ),
         tips = listOf(
-            "Nothing is ever lost when you switch screens — the fretboard, tab, piano roll " +
-                "and score are four views of the same music.",
-            "Undo is always there, and the project saves itself as you work.",
+            "Each page does one job, because there is not much height on a phone. The " +
+                "strip down the side (or along the bottom in portrait) moves between them.",
+            "Nothing is ever lost when you move between pages — Play, Notes, Tab and " +
+                "Score are all views of the same music.",
+            "Undo is always on the top bar, and the project saves itself as you work.",
         ),
     )
 
@@ -77,13 +81,13 @@ object Help {
                 "Pinch to show more or less of the neck; drag sideways to move along it.",
             ),
             tips = listOf(
-                "Big fretboard gives the whole screen to the neck, with just the note " +
-                    "length and undo underneath — the quickest way to play a line in.",
+                "The board fills the whole page, with one strip underneath for the note " +
+                    "length, the part you are writing into, and undo.",
                 "The numbers in the dots are the order the notes will play in.",
                 "The faint dots are the notes of the key you have chosen — handy for " +
                     "staying in key while you work out a line.",
-                "The Display button turns note names, intervals, scale degrees and " +
-                    "left-handed layout on and off.",
+                "Setup turns note names, intervals, scale degrees and left-handed layout " +
+                    "on and off.",
             ),
         ),
 
@@ -92,11 +96,11 @@ object Help {
             title = "Rhythm and the metronome",
             summary = "How long each note lasts, and the click to play against.",
             steps = listOf(
-                "The quickest way: tap notes first, then tap 1/4, 1/8 or 1/16 on the strip " +
-                    "under the fretboard to put the whole line on that rhythm.",
-                "For one note only, use the − and + next to it in the list.",
-                "For a rhythm you cannot tap out as a grid, open Rhythm and record it: the " +
-                    "click runs, you tap the rhythm, then apply it to your notes.",
+                "The quickest way: on the **Notes** page, tap 1/4, 1/8 or 1/16 at the top " +
+                    "to put the whole line on that rhythm.",
+                "For one note only, use the − and + on its row.",
+                "For a rhythm you cannot tap out as a grid, go to **Setup** and record it: " +
+                    "the click runs, you tap the rhythm, then apply it to your notes.",
                 "You can also work the other way round — record a rhythm first, keep it, " +
                     "then tap notes and each one takes the next slot.",
             ),
@@ -110,7 +114,8 @@ object Help {
         HelpTopic(
             id = "key",
             title = "Key and scale",
-            summary = "What scale the song is in. This is what makes the harmony musical.",
+            summary = "What scale the song is in, on the Setup page. This is what makes " +
+                "the harmony musical.",
             steps = listOf(
                 "Pick a root note and a scale.",
                 "Detect key guesses it from the notes you have played.",
@@ -128,7 +133,7 @@ object Help {
             title = "Harmony",
             summary = "Generates a second part that follows your line, in the key you chose.",
             steps = listOf(
-                "Play a line in first and set the key.",
+                "Play a line in on the Play page first, and set the key in Setup.",
                 "Tap Harmonise and choose an interval. A 3rd above is the usual twin-guitar " +
                     "harmony; a 6th below is the other classic.",
                 "You can pick several at once to get several harmony parts.",
@@ -160,8 +165,8 @@ object Help {
             ),
             tips = listOf(
                 "Loop the whole section and it will go round and round while you practise.",
-                "The Mixer has per-part volume, pan, mute and solo if you want finer " +
-                    "control, and a Room slider that sets how much space is around the sound.",
+                "The mixer at the bottom of the Harmony page has per-part volume, pan, " +
+                    "mute and solo, and a Room slider for how much space is around the sound.",
             ),
         ),
 
@@ -198,7 +203,7 @@ object Help {
                 "Tap an empty spot on a line to add a note there.",
             ),
             tips = listOf(
-                "The − and + next to the view buttons make the tab bigger or smaller.",
+                "The − and + at the top of the page make the tab bigger or smaller.",
                 "The marks under the staff are the rhythm: a stem per note, beams for " +
                     "eighths and shorter.",
                 "Editing here changes the actual music, so the fretboard and the score " +
@@ -242,7 +247,7 @@ object Help {
             tips = listOf(
                 "This is for reading and for printing — it is the view to use if you want " +
                     "sheet music rather than tab, or if someone else needs to read your part.",
-                "The − and + next to the view buttons make the score bigger or smaller.",
+                "The − and + at the top of the page make the score bigger or smaller.",
                 "The key signature, the accidentals, the beams, the rests and the ties are " +
                     "all worked out from your notes; you do not place them.",
                 "Guitar and bass music is written an octave above where it sounds, which is " +
@@ -254,7 +259,8 @@ object Help {
         HelpTopic(
             id = "instrument",
             title = "Instrument and tuning",
-            summary = "What you are playing: guitar or bass, how many strings, tuned how.",
+            summary = "On the Setup page: guitar or bass, how many strings, tuned how, and " +
+                "what it sounds like.",
             steps = listOf(
                 "Switch between guitar and bass, or change the string count, at any time.",
                 "Pick a tuning preset, or tune each string by itself.",
@@ -273,6 +279,8 @@ object Help {
             title = "Playing and looping",
             summary = "The bar at the top: play, stop, loop, tempo, position and undo.",
             steps = listOf(
+                "The bar across the top of every page: it stays put as you move between " +
+                    "them, so playback is always one tap away.",
                 "Play starts from the beginning, or from the loop if one is set.",
                 "The loop button sets a loop; its menu chooses what the loop covers — the " +
                     "whole section, this bar, two or four bars, or your selection.",

@@ -72,6 +72,14 @@ fun TransportBar(
     canRedo: Boolean,
     saveState: SaveState,
     modifier: Modifier = Modifier,
+    /**
+     * Compact mode puts the page's name and its help button on the same row as the
+     * transport, because on a phone in landscape there is no height to spare for a
+     * separate title bar.
+     */
+    compact: Boolean = false,
+    title: String? = null,
+    help: (@Composable () -> Unit)? = null,
     onPlay: () -> Unit,
     onPause: () -> Unit,
     onStop: () -> Unit,
@@ -144,6 +152,17 @@ fun TransportBar(
                     )
                 }
                 IconToggle(Icons.Default.Stop, "Stop", onClick = onStop)
+
+                // The page's name, where there is room for it.
+                if (compact && title != null && width >= 620.dp) {
+                    Spacer(Modifier.width(spacing.small))
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                    )
+                }
                 if (showRestart) {
                     IconToggle(Icons.Default.Replay, "Back to start", onClick = onRestart)
                 }
@@ -261,6 +280,7 @@ fun TransportBar(
                         Icons.Default.Redo, "Redo", enabled = canRedo, onClick = onRedo,
                     )
                 }
+                help?.invoke()
             }
 
             // On a narrow screen the loop, click and undo live on their own row.
