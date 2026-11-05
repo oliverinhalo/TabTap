@@ -53,6 +53,7 @@ fun HarmonyPanel(
     onSetMode: (HarmonyMode) -> Unit,
     onSetChromaticHandling: (ChromaticHandling) -> Unit,
     onSetFollowChords: (Boolean) -> Unit,
+    onSetOctaveShift: (Int) -> Unit,
     onGenerate: () -> Unit,
     onRegenerate: () -> Unit,
 ) {
@@ -120,6 +121,33 @@ fun HarmonyPanel(
                     HarmonyMode.CHROMATIC ->
                         "Every note moves by the same number of semitones, whatever the key."
                 },
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textTertiary,
+            )
+
+            Spacer(Modifier.height(spacing.medium))
+            SectionLabel("Octave")
+            Spacer(Modifier.height(spacing.tiny))
+            SegmentedControl(
+                options = listOf(-2, -1, 0, 1, 2),
+                selected = staged.firstOrNull()?.octaveShift ?: 0,
+                onSelect = onSetOctaveShift,
+                label = {
+                    when (it) {
+                        0 -> "Same"
+                        1 -> "+1"
+                        2 -> "+2"
+                        -1 -> "\u22121"
+                        else -> "\u22122"
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                compact = true,
+            )
+            Spacer(Modifier.height(spacing.tiny))
+            Text(
+                "Shifts the whole harmony line by octaves after the interval, which is how " +
+                    "a part is moved into a register that suits the instrument.",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.textTertiary,
             )

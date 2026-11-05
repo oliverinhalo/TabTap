@@ -2,6 +2,8 @@ package com.tabtap.app.ui.panes
 
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -13,9 +15,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
@@ -47,6 +53,15 @@ fun ScorePane(
     /** Show only this track; null shows every track. */
     onlyTrackId: Long? = null,
     staffSizeDp: Int = 9,
+    /** Tap a notehead. The second argument is true for an additive (long-press) tap. */
+    onSelectNote: (Long, Boolean) -> Unit = { _, _ -> },
+    /**
+     * Drag a notehead up or down. [steps] is the number of *diatonic* steps moved, which
+     * the caller converts into a transposition within the key.
+     */
+    onDragNote: (noteId: Long, steps: Int) -> Unit = { _, _ -> },
+    /** Tap an empty part of a staff, to move the playhead there. */
+    onTapEmpty: (trackId: Long) -> Unit = {},
 ) {
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
@@ -84,6 +99,9 @@ fun ScorePane(
                     playheadTick = playheadTick,
                     measurer = measurer,
                     showName = tracks.size > 1,
+                    onSelectNote = onSelectNote,
+                    onDragNote = onDragNote,
+                    onTapEmpty = { onTapEmpty(track.id) },
                 )
                 Spacer(Modifier.height(10.dp))
             }
@@ -101,6 +119,9 @@ private fun ScoreStaff(
     playheadTick: Long?,
     measurer: androidx.compose.ui.text.TextMeasurer,
     showName: Boolean,
+    onSelectNote: (Long, Boolean) -> Unit,
+    onDragNote: (noteId: Long, steps: Int) -> Unit,
+    onTapEmpty: () -> Unit,
 ) {
     val density = LocalDensity.current
     val score = remember(track, composition.key, composition.timeSignature, composition.tempoMap, widthPx) {
@@ -127,13 +148,65 @@ private fun ScoreStaff(
     }
     val heightDp = with(density) { painter.totalHeight(score.systems.size).toDp() }
 
+    // Each staff keeps its own painter so the hit areas belong to the right part.
+    val staffPainter = remember(painter, track.id) { ScorePainter(painter.spacePx, ScorePalette.DARK) }
+    val staffCommands = remember(score, selectedNoteIds, playheadTick) {
+        staffPainter.paint(
+            score = score,
+            width = widthPx,
+            selectedNoteIds = selectedNoteIds,
+            playheadTick = playheadTick,
+            trackColorIndex = track.colorSlot,
+            showPartName = if (showName) track.name else null,
+        )
+    }
+    var dragOrigin by remember { mutableStateOf<Pair<Long, Float>?>(null) }
+
     Box(
         Modifier
             .fillMaxWidth()
-            .height(heightDp),
+            .height(heightDp)
+            .pointerInput(staffCommands) {
+                detectTapGestures(
+                    onTap = { offset ->
+                        val hit = staffPainter.noteBounds.firstOrNull {
+                            it.contains(offset.x, offset.y)
+                        }
+                        if (hit != null) onSelectNote(hit.noteId, false) else onTapEmpty()
+                    },
+                    onLongPress = { offset ->
+                        staffPainter.noteBounds.firstOrNull { it.contains(offset.x, offset.y) }
+                            ?.let { onSelectNote(it.noteId, true) }
+                    },
+                )
+            }
+            .pointerInput(staffCommands) {
+                // Dragging a notehead up or down moves it by diatonic steps, which is how
+                // a note is edited on a staff: you move it to the next line or space,
+                // not by a semitone.
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { offset ->
+                        val hit = staffPainter.noteBounds.firstOrNull {
+                            it.contains(offset.x, offset.y)
+                        }
+                        dragOrigin = hit?.let { it.noteId to offset.y }
+                    },
+                    onDragEnd = { dragOrigin = null },
+                    onDragCancel = { dragOrigin = null },
+                    onDrag = { change, _ ->
+                        val (noteId, startY) = dragOrigin ?: return@detectDragGesturesAfterLongPress
+                        val steps = ((startY - change.position.y) / staffPainter.stepHeightPx)
+                            .toInt()
+                        if (steps != 0) {
+                            onDragNote(noteId, steps)
+                            dragOrigin = noteId to change.position.y
+                        }
+                    },
+                )
+            },
     ) {
         androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
-            drawScoreCommands(commands, measurer)
+            drawScoreCommands(staffCommands, measurer)
         }
     }
 }

@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
+    <!-- The project database and the user's preferences, and nothing else. -->
     <cloud-backup>
         <include domain="database" path="." />
         <include domain="sharedpref" path="." />
-        <exclude domain="cache" path="." />
     </cloud-backup>
     <device-transfer>
         <include domain="database" path="." />

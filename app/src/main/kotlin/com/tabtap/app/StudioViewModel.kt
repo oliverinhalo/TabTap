@@ -134,6 +134,11 @@ data class StudioUiState(
     val chordEditor: ChordEditorState = ChordEditorState(),
     val stagedHarmonies: List<HarmonySpec> = listOf(HarmonySpec.THIRD_ABOVE),
     val clipboard: CompositionEditor.Clipboard? = null,
+    /**
+     * A rhythm recorded before any notes were chosen. While it is non-empty, each tap on
+     * the fretboard takes the next onset, which is the "rhythm first" way of working.
+     */
+    val rhythmTemplate: List<Long> = emptyList(),
     val isLoading: Boolean = false,
 ) {
     val activeTrack: Track? get() = composition.activeTrack
@@ -142,6 +147,11 @@ data class StudioUiState(
     val isPlaying: Boolean
         get() = playback.state == TransportState.PLAYING || playback.state == TransportState.COUNTING_IN
     val hasSelection: Boolean get() = selectedNoteIds.isNotEmpty()
+
+    /** How many slots of the rhythm template are still to be filled. */
+    val rhythmSlotsRemaining: Int
+        get() = (rhythmTemplate.size - (activeTrack?.notes?.map { it.startTick }?.distinct()?.size ?: 0))
+            .coerceAtLeast(0)
 
     /** The notes currently selected on the active track. */
     val selectedNotes: List<MusicNote>
@@ -302,6 +312,23 @@ class StudioViewModel(
     /** The most recently opened project, so the app reopens where the user left off. */
     suspend fun projectsRepositoryMostRecentId(): Long? = repository.mostRecentProjectId()
 
+    /**
+     * Save on demand, with confirmation.
+     *
+     * Autosave means this is never strictly necessary, but a player who has just finished
+     * something wants to be told it is safe rather than to trust a debounce.
+     */
+    fun saveAndConfirm() {
+        if (_state.value.projectId == null) {
+            emit("No project is open")
+            return
+        }
+        viewModelScope.launch {
+            persist(_state.value.composition)
+            if (_state.value.saveState == SaveState.SAVED) emit("Project saved")
+        }
+    }
+
     fun saveNow() {
         saveJob?.cancel()
         val composition = _state.value.composition
@@ -435,6 +462,30 @@ class StudioViewModel(
             recordTapAt(string, fret)
             return
         }
+
+        // With a rhythm template in hand, each tap fills the next slot in the pattern.
+        val template = state.rhythmTemplate
+        if (template.isNotEmpty()) {
+            val index = state.activeTrack?.notes?.map { it.startTick }?.distinct()?.size ?: 0
+            if (index < template.size) {
+                val start = template[index]
+                val duration = if (index + 1 < template.size) {
+                    (template[index + 1] - start).toInt().coerceAtLeast(1)
+                } else {
+                    state.entryValue.ticks
+                }
+                edit("Add ${Pitch.fullName(pitch)}") {
+                    CompositionEditor.addNoteAt(it, trackId, string, fret, start, duration)
+                }
+                if (index + 1 == template.size) {
+                    clearRhythmTemplate()
+                    emit("Rhythm filled in")
+                }
+                return
+            }
+            clearRhythmTemplate()
+        }
+
         edit("Add ${Pitch.fullName(pitch)}") {
             CompositionEditor.appendNoteAtPosition(it, trackId, string, fret, state.entryValue)
         }
@@ -497,6 +548,24 @@ class StudioViewModel(
         val trackId = _state.value.activeTrackId ?: return
         edit("Move note", coalesceKey = "move-$noteId") {
             CompositionEditor.moveNoteToPosition(it, trackId, noteId, string, fret)
+        }
+    }
+
+    /**
+     * Move a note by diatonic steps within the key, which is what dragging a notehead up
+     * or down a staff means: the next line or space, not the next semitone.
+     */
+    fun moveNoteByScaleSteps(noteId: Long, steps: Int) {
+        val state = _state.value
+        val trackId = state.activeTrackId ?: return
+        val note = state.activeTrack?.note(noteId) ?: return
+        val target = com.tabtap.music.HarmonyGenerator.diatonicTranspose(
+            note.pitch, state.composition.key, steps,
+        )
+        val semitones = target - note.pitch
+        if (semitones == 0) return
+        edit("Move note", coalesceKey = "scale-step-$noteId") {
+            CompositionEditor.transposeNote(it, trackId, noteId, semitones)
         }
     }
 
@@ -762,6 +831,35 @@ class StudioViewModel(
         emit("Applied a ${onsets.size}-tap rhythm")
     }
 
+    /**
+     * Keep the recorded taps as a rhythm template, to be filled in with notes.
+     *
+     * This is the "rhythm first, notes afterwards" path: the taps are remembered, and
+     * every note tapped on the fretboard from then on takes the next onset in the
+     * pattern, so a rhythm can be worked out before a single pitch is chosen.
+     */
+    fun keepRhythmAsTemplate() {
+        stop()
+        val state = _state.value
+        val onsets = RhythmEngine.quantizeStarts(
+            state.recording.onsets, state.quantize, state.composition.timeSignature,
+        )
+        if (onsets.isEmpty()) {
+            _state.value = state.copy(recording = RhythmRecording())
+            emit("No taps were recorded")
+            return
+        }
+        _state.value = state.copy(
+            recording = RhythmRecording(),
+            rhythmTemplate = onsets,
+        )
+        emit("Rhythm kept: tap ${onsets.size} notes on the fretboard to fill it in")
+    }
+
+    fun clearRhythmTemplate() {
+        _state.value = _state.value.copy(rhythmTemplate = emptyList())
+    }
+
     /** Stop recording and keep the notes exactly where they were played. */
     fun commitRecordingAsPlayed() {
         stop()
@@ -798,6 +896,23 @@ class StudioViewModel(
 
     fun setKey(key: Key) {
         edit("Set key to ${key.shortName}") { CompositionEditor.setKey(it, key) }
+    }
+
+    /**
+     * Build a custom scale from a set of semitone offsets and make it the project's.
+     *
+     * The offsets are normalised and given sensible letter steps so the scale still
+     * spells and engraves correctly, which is what distinguishes this from simply
+     * highlighting arbitrary frets.
+     */
+    fun setCustomScale(semitones: Set<Int>) {
+        if (semitones.size < 2) {
+            emit("A scale needs at least two notes")
+            return
+        }
+        val scale = ScaleType.custom("custom", "Custom", semitones.sorted())
+        val key = _state.value.composition.key
+        edit("Custom scale") { CompositionEditor.setKey(it, key.copy(scale = scale)) }
     }
 
     fun setScale(scale: ScaleType) {
@@ -928,6 +1043,14 @@ class StudioViewModel(
 
     fun setStagedHarmonies(specs: List<HarmonySpec>) {
         _state.value = _state.value.copy(stagedHarmonies = specs)
+    }
+
+    /** Shift every staged harmony voice by whole octaves. */
+    fun setStagedHarmonyOctave(octaveShift: Int) {
+        val clamped = octaveShift.coerceIn(-2, 2)
+        _state.value = _state.value.copy(
+            stagedHarmonies = _state.value.stagedHarmonies.map { it.copy(octaveShift = clamped) },
+        )
     }
 
     fun toggleStagedHarmony(spec: HarmonySpec) {

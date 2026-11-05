@@ -69,6 +69,7 @@ fun KeyScalePanel(
     onSetKey: (Key) -> Unit,
     onTransposeToKey: (Key) -> Unit,
     onSuggestKey: () -> Unit,
+    onSetCustomScale: (Set<Int>) -> Unit = {},
 ) {
     val spacing = LocalSpacing.current
     val colors = LocalTabTapColors.current
@@ -108,6 +109,21 @@ fun KeyScalePanel(
                     )
                 }
             }
+
+            Spacer(Modifier.height(spacing.medium))
+            SectionLabel("Custom scale")
+            Spacer(Modifier.height(spacing.tiny))
+            Text(
+                "Switch any degree on or off to build your own scale. It still spells and " +
+                    "engraves correctly, and harmony generation moves by its steps.",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textTertiary,
+            )
+            Spacer(Modifier.height(spacing.small))
+            CustomScaleBuilder(
+                selected = key.scale.semitones.toSet(),
+                onChange = onSetCustomScale,
+            )
 
             Spacer(Modifier.height(spacing.medium))
             ReadoutRow(
@@ -366,6 +382,37 @@ fun DisplayPanel(
                 onValueChange = { onChange(display.copy(visibleFretCount = it.roundToInt())) },
                 valueRange = 5f..Fretboard.MAX_FRETS.toFloat(),
                 valueText = "${display.visibleFretCount}",
+            )
+        }
+    }
+}
+
+/**
+ * The custom-scale builder: the twelve chromatic degrees as toggles.
+ *
+ * The root is always on, because a scale without its own tonic is not a scale and
+ * allowing it off would make every degree label meaningless.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CustomScaleBuilder(selected: Set<Int>, onChange: (Set<Int>) -> Unit) {
+    val spacing = LocalSpacing.current
+    val labels = listOf("1", "b2", "2", "b3", "3", "4", "b5", "5", "b6", "6", "b7", "7")
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(spacing.tiny),
+        verticalArrangement = Arrangement.spacedBy(spacing.tiny),
+    ) {
+        for (semitone in 0..11) {
+            val isOn = semitone in selected
+            TabTapChip(
+                text = labels[semitone],
+                selected = isOn,
+                enabled = semitone != 0,
+                accent = if (semitone == 0) MusicColors.rootNote else null,
+                onClick = {
+                    val next = if (isOn) selected - semitone else selected + semitone
+                    onChange(next + 0)
+                },
             )
         }
     }

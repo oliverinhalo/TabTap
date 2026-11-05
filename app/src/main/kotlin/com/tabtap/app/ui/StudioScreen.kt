@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.Button
@@ -259,6 +260,17 @@ fun StudioScreen(
                                 composition = state.composition,
                                 selectedNoteIds = state.selectedNoteIds,
                                 playheadTick = state.playback.tick.takeIf { state.isPlaying },
+                                onSelectNote = { id, additive ->
+                                    if (additive) {
+                                        model.toggleSelection(id)
+                                    } else {
+                                        model.setSelection(setOf(id))
+                                    }
+                                },
+                                // Dragging a notehead moves it by scale steps, as moving
+                                // a note to the next line or space on a staff does.
+                                onDragNote = model::moveNoteByScaleSteps,
+                                onTapEmpty = { model.setActiveTrack(it) },
                             )
                         }
                     }
@@ -349,6 +361,7 @@ private fun EntryToolbar(
         Spacer(Modifier.height(spacing.tiny))
 
         Row(horizontalArrangement = Arrangement.spacedBy(spacing.tiny)) {
+            IconToggle(Icons.Default.Save, "Save now") { model.saveAndConfirm() }
             IconToggle(Icons.Default.Undo, "Undo last note", enabled = state.canUndo) {
                 model.undo()
             }
@@ -528,6 +541,9 @@ private fun ToolContent(
                     onRecordTap = model::recordRhythmTap,
                     onCommitRhythm = model::commitRhythmToNotes,
                     onCommitAsPlayed = model::commitRecordingAsPlayed,
+                    onKeepAsTemplate = model::keepRhythmAsTemplate,
+                    rhythmSlotsRemaining = state.rhythmSlotsRemaining,
+                    onClearTemplate = model::clearRhythmTemplate,
                     onCancelRecording = model::cancelRhythmRecording,
                     onApplyEvenRhythm = model::applyEvenRhythm,
                     onQuantize = model::quantizeTrack,
@@ -554,6 +570,7 @@ private fun ToolContent(
                             state.stagedHarmonies.map { it.copy(followChords = follow) },
                         )
                     },
+                    onSetOctaveShift = model::setStagedHarmonyOctave,
                     onGenerate = model::generateHarmonies,
                     onRegenerate = model::regenerateHarmonies,
                 )
@@ -563,6 +580,7 @@ private fun ToolContent(
                     onSetKey = model::setKey,
                     onTransposeToKey = model::transposeToKey,
                     onSuggestKey = model::suggestKey,
+                    onSetCustomScale = model::setCustomScale,
                 )
                 StudioTool.INSTRUMENT -> InstrumentPanel(
                     track = track,

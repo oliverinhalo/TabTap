@@ -65,6 +65,17 @@ android {
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
+        unitTests.isReturnDefaultValues = true
+        unitTests.all {
+            // Robolectric downloads its Android runtime jars with its own fetcher rather
+            // than through Gradle, so the mirror has to be pointed out to it separately.
+            it.systemProperty(
+                "robolectric.dependency.repo.url",
+                "https://maven-central.storage-download.googleapis.com/maven2",
+            )
+            it.systemProperty("robolectric.dependency.repo.id", "central-mirror")
+            it.maxHeapSize = "2g"
+        }
     }
 
     // Room needs to know where to write its generated schemas for migration testing.
@@ -101,8 +112,19 @@ dependencies {
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
 
+    // Robolectric runs the Android-dependent tests — Room, and the Compose UI — on the
+    // JVM, so persistence and the interface are covered by `gradlew test` without
+    // needing a connected device. The same tests also run on a real device through
+    // connectedAndroidTest.
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.junit)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.room.testing)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    testImplementation(libs.compose.ui.test.manifest)
 
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.test.core)

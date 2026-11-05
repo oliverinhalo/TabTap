@@ -28,9 +28,35 @@ import kotlin.math.max
  * scaled — so the score is legible at any size without a separate layout pass.
  */
 class ScorePainter(
-    private val spacePx: Float,
+    /** Pixels per staff space: the unit the whole engraving is proportioned from. */
+    val spacePx: Float,
     private val palette: ScorePalette = ScorePalette.DARK,
 ) {
+    /**
+     * Where a notehead was drawn, so the score can be tapped to select and edit a note.
+     *
+     * Collected while painting, which is the only way the hit areas can be guaranteed to
+     * match what is on screen.
+     */
+    data class NoteBounds(
+        val noteId: Long,
+        val x: Float,
+        val y: Float,
+        val width: Float,
+        val height: Float,
+        /** Staff step the notehead sits on, so a drag can be turned into a transposition. */
+        val staffStep: Int,
+    ) {
+        fun contains(px: Float, py: Float): Boolean =
+            px >= x && px <= x + width && py >= y && py <= y + height
+    }
+
+    /** Bounds of every notehead from the last [paint] call. */
+    val noteBounds = ArrayList<NoteBounds>()
+
+    /** Half the vertical distance between two staff steps, for turning a drag into steps. */
+    val stepHeightPx: Float get() = spacePx / 2f
+
     /** Vertical space one system occupies, including room for ledger lines and text. */
     val systemHeightPx: Float get() = spacePx * 13f
 
@@ -60,6 +86,7 @@ class ScorePainter(
         showPartName: String? = null,
     ): List<ScoreDrawCommand> {
         val out = ArrayList<ScoreDrawCommand>(512)
+        noteBounds.clear()
         var y = spacePx * 1.5f
         for (system in score.systems) {
             paintSystem(out, system, score, y, width, selectedNoteIds, playheadTick, trackColorIndex)
@@ -302,6 +329,16 @@ class ScorePainter(
                 color = color,
                 filled = chord.value.filled,
                 strokeWidth = if (chord.value.filled) 0f else spacePx * 0.16f,
+            )
+
+            // A hit area generous enough to tap with a finger, not just a stylus.
+            noteBounds += NoteBounds(
+                noteId = head.noteId,
+                x = cx - headWidth * 0.75f,
+                y = y - spacePx * 0.6f,
+                width = headWidth * 1.5f,
+                height = spacePx * 1.2f,
+                staffStep = head.staffStep,
             )
 
             // Accidental, to the left of the head.

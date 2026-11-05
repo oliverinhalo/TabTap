@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
-    <!-- Projects are worth backing up; caches and exported files are not. -->
+    <!--
+      Projects are worth backing up; nothing else is. Naming the two domains that hold
+      them means everything outside those — caches, exported files, the audio engine's
+      scratch space — is excluded by omission.
+    -->
     <include domain="database" path="." />
     <include domain="sharedpref" path="." />
-    <exclude domain="file" path="exports/" />
-    <exclude domain="cache" path="." />
 </full-backup-content>

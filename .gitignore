@@ -10,3 +10,6 @@ captures/
 *.aab
 *.keystore
 .DS_Store
+
+# Robolectric's downloaded Android runtimes
+.robolectric/

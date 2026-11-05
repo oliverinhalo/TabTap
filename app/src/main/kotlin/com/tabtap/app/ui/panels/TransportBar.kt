@@ -3,6 +3,7 @@ package com.tabtap.app.ui.panels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -76,8 +77,21 @@ fun TransportBar(
     val spacing = LocalSpacing.current
     val colors = LocalTabTapColors.current
 
-    Surface(
-        modifier = modifier.fillMaxWidth(),
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        // The bar has to fit a phone in portrait as well as a tablet in landscape, so
+        // the secondary controls are dropped as the width shrinks rather than being
+        // allowed to overflow. The play, stop and position controls always survive.
+        val width = maxWidth
+        val showBeatLamps = width >= 560.dp
+        val showLoopAndClick = width >= 420.dp
+        val showRestart = width >= 380.dp
+        val showUndoRedo = width >= 480.dp
+        // Below this the plus/minus stepper does not fit; the tempo becomes a tappable
+        // readout instead, which still reaches tap-tempo and the tempo field.
+        val showTempoStepper = width >= 360.dp
+
+        Surface(
+        modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Column {
@@ -115,22 +129,39 @@ fun TransportBar(
                     )
                 }
                 IconToggle(Icons.Default.Stop, "Stop", onClick = onStop)
-                IconToggle(Icons.Default.Replay, "Back to start", onClick = onRestart)
-                IconToggle(
-                    Icons.Default.Loop, "Loop",
-                    checked = looping, onClick = onToggleLoop,
-                )
-                IconToggle(
-                    Icons.Default.GraphicEq, "Metronome",
-                    checked = metronomeEnabled,
-                    accent = MusicColors.harmony[0],
-                    onClick = onToggleMetronome,
-                )
+                if (showRestart) {
+                    IconToggle(Icons.Default.Replay, "Back to start", onClick = onRestart)
+                }
+                if (showLoopAndClick) {
+                    IconToggle(
+                        Icons.Default.Loop, "Loop",
+                        checked = looping, onClick = onToggleLoop,
+                    )
+                    IconToggle(
+                        Icons.Default.GraphicEq, "Metronome",
+                        checked = metronomeEnabled,
+                        accent = MusicColors.harmony[0],
+                        onClick = onToggleMetronome,
+                    )
+                }
+
+                if (showBeatLamps) {
+                    Spacer(Modifier.width(spacing.small))
+                    // The visual beat indicator: one lamp per felt beat of the bar, the
+                    // current one lit. It is what lets you follow the click without
+                    // listening, and it shows the metre at a glance.
+                    BeatIndicator(
+                        timeSignature = timeSignature,
+                        positionTick = positionTick,
+                        active = isPlaying,
+                        countingIn = countInBeatsRemaining > 0,
+                    )
+                }
 
                 Spacer(Modifier.width(spacing.small))
 
                 // Position, in bars and beats.
-                Column(Modifier.width(96.dp)) {
+                Column(Modifier.width(if (showUndoRedo) 96.dp else 84.dp)) {
                     Text(
                         if (countInBeatsRemaining > 0) {
                             "Count-in $countInBeatsRemaining"
@@ -144,33 +175,47 @@ fun TransportBar(
                             MaterialTheme.colorScheme.onSurface
                         },
                     )
-                    Text(
-                        "bar . beat",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.textTertiary,
-                    )
+                    if (showLoopAndClick) {
+                        Text(
+                            "bar . beat",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.textTertiary,
+                        )
+                    }
                 }
 
                 Spacer(Modifier.weight(1f))
 
-                Stepper(
-                    label = "Tempo",
-                    value = "${bpm.roundToInt()}",
-                    onDecrement = { onTempoChange(bpm - 1) },
-                    onIncrement = { onTempoChange(bpm + 1) },
-                    decrementEnabled = bpm > 20,
-                    incrementEnabled = bpm < 400,
-                    onValueClick = onTapTempo,
-                )
+                if (showTempoStepper) {
+                    Stepper(
+                        label = "Tempo",
+                        value = "${bpm.roundToInt()}",
+                        onDecrement = { onTempoChange(bpm - 1) },
+                        onIncrement = { onTempoChange(bpm + 1) },
+                        decrementEnabled = bpm > 20,
+                        incrementEnabled = bpm < 400,
+                        onValueClick = onTapTempo,
+                    )
+                } else {
+                    Text(
+                        "${bpm.roundToInt()}",
+                        style = MonoType.readout,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier
+                            .width(44.dp)
+                            .clickable(onClick = onTapTempo),
+                    )
+                }
 
-                Spacer(Modifier.width(spacing.small))
-
-                IconToggle(
-                    Icons.Default.Undo, "Undo", enabled = canUndo, onClick = onUndo,
-                )
-                IconToggle(
-                    Icons.Default.Redo, "Redo", enabled = canRedo, onClick = onRedo,
-                )
+                if (showUndoRedo) {
+                    Spacer(Modifier.width(spacing.small))
+                    IconToggle(
+                        Icons.Default.Undo, "Undo", enabled = canUndo, onClick = onUndo,
+                    )
+                    IconToggle(
+                        Icons.Default.Redo, "Redo", enabled = canRedo, onClick = onRedo,
+                    )
+                }
             }
 
             // A one-pixel save indicator: visible when it matters, invisible otherwise.
@@ -185,6 +230,45 @@ fun TransportBar(
                             else -> Color.Transparent
                         },
                     ),
+            )
+        }
+    }
+    }
+}
+
+/**
+ * The beat indicator: a row of lamps, one per felt pulse of the bar.
+ *
+ * The downbeat's lamp is wider, so an irregular metre like 7/8 reads as its grouping
+ * rather than as seven identical dots.
+ */
+@Composable
+private fun BeatIndicator(
+    timeSignature: TimeSignature,
+    positionTick: Long,
+    active: Boolean,
+    countingIn: Boolean,
+) {
+    val pulses = timeSignature.pulsesPerBar.coerceIn(1, 16)
+    val within = positionTick % timeSignature.barTicks
+    val currentPulse = (within / timeSignature.pulseTicks).toInt().coerceIn(0, pulses - 1)
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        for (pulse in 0 until pulses) {
+            val isCurrent = active && pulse == currentPulse
+            val isDownbeat = pulse == 0
+            val color = when {
+                countingIn && isCurrent -> MusicColors.harmony[0]
+                isCurrent && isDownbeat -> MusicColors.playhead
+                isCurrent -> MaterialTheme.colorScheme.primary
+                isDownbeat -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.22f)
+            }
+            Box(
+                Modifier
+                    .padding(horizontal = 1.5.dp)
+                    .size(width = if (isDownbeat) 10.dp else 6.dp, height = 10.dp)
+                    .background(color, androidx.compose.foundation.shape.RoundedCornerShape(2.dp)),
             )
         }
     }

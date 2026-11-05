@@ -182,6 +182,51 @@ fun ChordsScreen(
             }
         }
 
+        // --- Custom chord ---
+        Panel(title = "Custom chord") {
+            Column {
+                Text(
+                    "Switch intervals on or off to build a chord type the list does not " +
+                        "cover. Voicings are searched for it exactly as for a built-in one.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textTertiary,
+                )
+                Spacer(Modifier.height(spacing.small))
+                val intervalLabels = listOf(
+                    "b2" to 1, "2" to 2, "b3" to 3, "3" to 4, "4" to 5, "b5" to 6,
+                    "5" to 7, "#5" to 8, "6" to 9, "b7" to 10, "7" to 11,
+                    "9" to 14, "11" to 17, "13" to 21,
+                )
+                val current = editor.type.semitones.toSet()
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(spacing.small),
+                    verticalArrangement = Arrangement.spacedBy(spacing.small),
+                ) {
+                    for ((label, semitone) in intervalLabels) {
+                        val isOn = semitone in current
+                        TabTapChip(
+                            text = label,
+                            selected = isOn,
+                            onClick = {
+                                val next = if (isOn) current - semitone else current + semitone
+                                if (next.size >= 2) {
+                                    model.setChordEditor(
+                                        editor.copy(
+                                            type = ChordType.custom(
+                                                "Custom",
+                                                next.filter { it != 0 }.sorted(),
+                                            ),
+                                            voicingIndex = 0,
+                                        ),
+                                    )
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
         // --- Voicings as diagrams ---
         if (chord != null) {
             Panel(title = "Voicings on ${state.activeTrack?.tuning?.displayName ?: "this tuning"}") {

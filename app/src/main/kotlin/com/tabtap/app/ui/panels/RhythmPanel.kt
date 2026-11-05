@@ -67,6 +67,9 @@ fun RhythmPanel(
     onRecordTap: () -> Unit,
     onCommitRhythm: () -> Unit,
     onCommitAsPlayed: () -> Unit,
+    onKeepAsTemplate: () -> Unit,
+    rhythmSlotsRemaining: Int,
+    onClearTemplate: () -> Unit,
     onCancelRecording: () -> Unit,
     onApplyEvenRhythm: (NoteValue) -> Unit,
     onQuantize: () -> Unit,
@@ -176,8 +179,29 @@ fun RhythmPanel(
                         }
                     }
                     Spacer(Modifier.height(spacing.tiny))
+                    // The "rhythm first" route: keep the taps and fill in pitches after.
+                    OutlinedButton(
+                        onClick = onKeepAsTemplate,
+                        enabled = recording.tapCount > 0,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Keep as a rhythm to fill in") }
+                    Spacer(Modifier.height(spacing.tiny))
                     OutlinedButton(onClick = onCancelRecording, modifier = Modifier.fillMaxWidth()) {
                         Text("Cancel")
+                    }
+                }
+
+                if (rhythmSlotsRemaining > 0) {
+                    Spacer(Modifier.height(spacing.medium))
+                    Text(
+                        "A rhythm is waiting: tap $rhythmSlotsRemaining more note(s) on the " +
+                            "fretboard and each one will take the next slot.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MusicColors.harmony[0],
+                    )
+                    Spacer(Modifier.height(spacing.small))
+                    OutlinedButton(onClick = onClearTemplate, modifier = Modifier.fillMaxWidth()) {
+                        Text("Discard the waiting rhythm")
                     }
                 }
             }
