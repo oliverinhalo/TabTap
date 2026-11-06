@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Piano
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.ui.graphics.vector.ImageVector
 
@@ -39,6 +40,7 @@ enum class Page(
     PROJECTS("Projects", "Files", Icons.Default.FolderOpen, "projects", false, needsProject = false),
     PLAY("Play the notes in", "Play", Icons.Default.MusicNote, "fretboard", true),
     NOTES("Notes and rhythm", "Notes", Icons.AutoMirrored.Filled.QueueMusic, "rhythm", true),
+    TAP("Tap the rhythm", "Tap", Icons.Default.TouchApp, "tap", true),
     HARMONY("Harmony", "Harmony", Icons.Default.Tune, "harmony", true),
     CHORDS("Chords", "Chords", Icons.Default.Piano, "chords", true),
     TAB("Tab", "Tab", Icons.Default.GridOn, "tab", true),

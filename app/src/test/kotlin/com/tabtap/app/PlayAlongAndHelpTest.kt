@@ -139,8 +139,9 @@ class PlayAlongAndHelpTest {
         // Every pane, panel and screen the user can reach must have an entry, because the
         // help buttons look those entries up by id and a missing one would show nothing.
         val required = listOf(
-            "start", "projects", "fretboard", "rhythm", "key", "harmony", "playalong",
-            "chords", "tab", "pianoroll", "score", "instrument", "transport", "export",
+            "start", "projects", "fretboard", "rhythm", "tap", "key", "harmony",
+            "playalong", "chords", "tab", "pianoroll", "score", "instrument", "transport",
+            "export",
         )
         for (id in required) {
             assertNotNull("no help for \"$id\"", Help.byId(id))

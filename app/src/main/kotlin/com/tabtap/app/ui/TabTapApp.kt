@@ -61,6 +61,7 @@ import com.tabtap.app.ui.pages.PlayPage
 import com.tabtap.app.ui.pages.ScorePage
 import com.tabtap.app.ui.pages.SetupPage
 import com.tabtap.app.ui.pages.TabPage
+import com.tabtap.app.ui.pages.TapRhythmPage
 import com.tabtap.app.ui.panels.TransportBar
 import kotlinx.coroutines.launch
 
@@ -225,6 +226,7 @@ fun TabTapApp(
                             )
                             page == Page.PLAY -> PlayPage(model, state)
                             page == Page.NOTES -> NotesPage(model, state)
+                            page == Page.TAP -> TapRhythmPage(model, state)
                             page == Page.HARMONY -> HarmonyPage(model, state)
                             page == Page.CHORDS -> ChordsScreen(model, state)
                             page == Page.TAB -> TabPage(model, state)

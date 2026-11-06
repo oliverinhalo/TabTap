@@ -266,6 +266,14 @@ private val LightScheme = lightColorScheme(
 @Composable
 fun TabTapTheme(
     darkTheme: Boolean = true,
+    /**
+     * Scales the whole interface by adjusting the density.
+     *
+     * Scaling the density rather than individual text sizes keeps every proportion and
+     * every touch target consistent — a screen at 0.85 is the same layout, smaller, so
+     * more of it fits on a short landscape screen.
+     */
+    uiScale: Float = 1f,
     content: @Composable () -> Unit,
 ) {
     val colors = if (darkTheme) {
@@ -278,9 +286,19 @@ fun TabTapTheme(
             textTertiary = Color(0xFF7A838C),
         )
     }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val scaled = if (uiScale == 1f) {
+        density
+    } else {
+        androidx.compose.ui.unit.Density(
+            density = density.density * uiScale.coerceIn(0.8f, 1.4f),
+            fontScale = density.fontScale,
+        )
+    }
     CompositionLocalProvider(
         LocalSpacing provides Spacing(),
         LocalTabTapColors provides colors,
+        androidx.compose.ui.platform.LocalDensity provides scaled,
     ) {
         MaterialTheme(
             colorScheme = if (darkTheme) DarkScheme else LightScheme,

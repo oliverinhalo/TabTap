@@ -192,6 +192,7 @@ fun FretboardView(
                     leftHanded = display.leftHanded,
                     labelWidthPx = with(density) { 30.dp.toPx() },
                     numberHeightPx = with(density) { 20.dp.toPx() },
+                    openColumnPx = with(density) { 34.dp.toPx() },
                 )
                 geometry = g
                 drawFretboard(g, fretboard, key, marks, display, sounding, measurer)
@@ -215,6 +216,15 @@ class FretboardGeometry(
     val leftHanded: Boolean,
     private val labelWidthPx: Float,
     private val numberHeightPx: Float,
+    /**
+     * Width reserved to the left of the nut for the open strings.
+     *
+     * Fret 0 used to have no width at all: its span was computed from the board's edge to
+     * fret 0's wire, which sit in the same place, so an open string could not be tapped —
+     * there was no way to play a nut note. The open strings now get a column of their own
+     * before the nut, which is also how a fretboard diagram draws them.
+     */
+    private val openColumnPx: Float = 0f,
 ) {
     /** The rectangle the board itself occupies, excluding labels and fret numbers. */
     val board: Rect = Rect(
@@ -225,6 +235,28 @@ class FretboardGeometry(
     )
 
     val boardWidth: Float get() = board.width
+
+    /** True when the nut, and therefore the open strings, are on screen. */
+    val showsOpenStrings: Boolean get() = firstFret == 0 && openColumnPx > 0f
+
+    /** The open-string column, or null when the window starts up the neck. */
+    val openColumn: Rect?
+        get() = if (!showsOpenStrings) {
+            null
+        } else if (leftHanded) {
+            Rect(board.right - openColumnPx, board.top, board.right, board.bottom)
+        } else {
+            Rect(board.left, board.top, board.left + openColumnPx, board.bottom)
+        }
+
+    /** Where the fretted part of the board begins, after the open-string column. */
+    private val frettedLeft: Float
+        get() = if (leftHanded) board.left else board.left + if (showsOpenStrings) openColumnPx else 0f
+
+    private val frettedRight: Float
+        get() = if (leftHanded) board.right - if (showsOpenStrings) openColumnPx else 0f else board.right
+
+    private val frettedWidth: Float get() = (frettedRight - frettedLeft).coerceAtLeast(1f)
 
     /** Vertical centre of each string, index 0 (lowest) at the bottom. */
     private val stringSpacing: Float get() = board.height / (stringCount + 0.6f)
@@ -243,7 +275,11 @@ class FretboardGeometry(
      */
     private fun fretFraction(n: Int): Float {
         val layout = Fretboard.fretLayout(totalFrets)
-        val start = layout[firstFret.coerceIn(0, totalFrets)]
+        // The window is laid out from the wire *before* its first fret, so that first
+        // fret has a span of its own to be tapped in. Without it the leftmost fret in a
+        // scrolled window was zero pixels wide and the fret after it absorbed the taps.
+        val anchor = (firstFret - 1).coerceAtLeast(0)
+        val start = layout[anchor.coerceIn(0, totalFrets)]
         val end = layout[lastFret.coerceIn(0, totalFrets)]
         val span = (end - start).takeIf { it > 1e-9 } ?: 1.0
         return ((layout[n.coerceIn(0, totalFrets)] - start) / span).toFloat()
@@ -253,30 +289,26 @@ class FretboardGeometry(
     fun fretWireX(n: Int): Float {
         val fraction = fretFraction(n)
         return if (leftHanded) {
-            board.right - fraction * board.width
+            frettedRight - fraction * frettedWidth
         } else {
-            board.left + fraction * board.width
+            frettedLeft + fraction * frettedWidth
         }
     }
 
-    /** Screen x where a finger stops fret [n]: between its wire and the one before. */
+    /** Screen x where a finger stops fret [n], or the open-string column for fret 0. */
     fun fretCentreX(n: Int): Float = when {
-        n <= firstFret -> {
-            // The open-string position sits just inside the nut.
-            val nut = fretWireX(firstFret)
-            val next = fretWireX(firstFret + 1)
-            nut + (next - nut) * 0.18f
-        }
+        n == 0 && showsOpenStrings -> openColumn!!.center.x
+        n <= 0 -> fretWireX(0)
         else -> (fretWireX(n - 1) + fretWireX(n)) / 2f
     }
 
     /** Radius of a note marker, sized to the string spacing and the fret width. */
     fun markerRadius(fret: Int): Float {
         val vertical = stringSpacing * 0.42f
-        val horizontal = if (fret > firstFret) {
-            abs(fretWireX(fret) - fretWireX(fret - 1)) * 0.42f
-        } else {
-            vertical
+        val horizontal = when {
+            fret == 0 && showsOpenStrings -> openColumnPx * 0.4f
+            fret > firstFret -> abs(fretWireX(fret) - fretWireX(fret - 1)) * 0.42f
+            else -> vertical
         }
         return min(vertical, max(horizontal, vertical * 0.45f))
     }
@@ -293,17 +325,27 @@ class FretboardGeometry(
         }
         if (bestDistance > stringSpacing * 0.85f) return null
 
-        // The fret whose span contains the touch.
-        for (f in firstFret..lastFret) {
-            val lower = if (f == firstFret) {
-                if (leftHanded) board.right else board.left
-            } else {
-                fretWireX(f - 1)
+        // The open strings, which have a column of their own before the nut.
+        openColumn?.let { column ->
+            if (position.x >= column.left && position.x <= column.right) {
+                return bestString to 0
             }
+        }
+
+        // Then the fret whose span contains the touch. Fret 0's wire is the nut itself,
+        // so the first fretted span starts there and belongs to fret 1.
+        val lowestFretted = maxOf(firstFret, 1)
+        for (f in lowestFretted..lastFret) {
+            val lower = fretWireX(f - 1)
             val upper = fretWireX(f)
             val lo = min(lower, upper)
             val hi = max(lower, upper)
             if (position.x in lo..hi) return bestString to f
+        }
+        // A touch past the last drawn fret still belongs to it, rather than doing nothing.
+        if (lastFret >= lowestFretted) {
+            val edge = fretWireX(lastFret)
+            if (abs(position.x - edge) < stringSpacing) return bestString to lastFret
         }
         return null
     }
@@ -361,7 +403,15 @@ private fun DrawScope.drawFretboard(
         )
     }
 
-    // --- The nut, when the window starts at the top of the neck ---
+    // --- The open-string column and the nut ---
+    g.openColumn?.let { column ->
+        // A slightly darker strip, so it reads as "behind the nut" rather than as a fret.
+        drawRect(
+            MusicColors.boardEdge.copy(alpha = 0.55f),
+            topLeft = column.topLeft,
+            size = column.size,
+        )
+    }
     if (g.firstFret == 0) {
         val x = g.fretWireX(0)
         drawLine(
@@ -390,6 +440,9 @@ private fun DrawScope.drawFretboard(
 
     for (s in 0 until g.stringCount) {
         for (fret in g.firstFret..g.lastFret) {
+            // Fret 0 is only drawn when its own column is on screen; otherwise the
+            // marker would land on top of the nut.
+            if (fret == 0 && !g.showsOpenStrings) continue
             val pitch = fretboard.pitchAtOrNull(s, fret) ?: continue
             val mark = markLookup[s to fret]
             val inScale = key.contains(pitch)
@@ -450,6 +503,21 @@ private fun DrawScope.drawFretboard(
 
     // --- Fret numbers ---
     if (display.showFretNumbers) {
+        g.openColumn?.let { column ->
+            val layout = measurer.measure(
+                "0",
+                TextStyle(
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    color = MusicColors.nut.copy(alpha = 0.8f),
+                ),
+            )
+            drawText(
+                layout,
+                topLeft = Offset(column.center.x - layout.size.width / 2f, g.board.bottom + 3f),
+            )
+        }
         for (fret in g.firstFret..g.lastFret) {
             if (fret == 0) continue
             // Label every fret when there is room, otherwise only the marked ones.

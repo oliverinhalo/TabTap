@@ -79,6 +79,31 @@ class PageLayoutTest {
 
     private fun n(s: String) = Pitch.parse(s)!!
 
+    /**
+     * A view model backed by a real repository against an in-memory database.
+     *
+     * The pages take the view model, so rendering them needs one; Robolectric gives us a
+     * real context, so this is the actual class rather than a stub that could drift from
+     * it.
+     */
+    private fun fakeModel(): StudioViewModel {
+        val context = androidx.test.core.app.ApplicationProvider
+            .getApplicationContext<android.app.Application>()
+        val database = com.tabtap.app.data.TabTapDatabase.inMemory(context)
+        return StudioViewModel(
+            context,
+            com.tabtap.app.data.ProjectRepository(database.projects()),
+            com.tabtap.app.audio.AudioEngine(),
+        )
+    }
+
+    /** The state a page needs, around a composition. */
+    private fun Composition.asState(): StudioUiState = StudioUiState(
+        projectId = 1L,
+        projectName = "Test",
+        composition = this,
+    )
+
     private fun composition(): Composition {
         var c = Composition.newGuitarProject(
             Tunings.STANDARD_E, 132.0, Key.of("E", ScaleType.NATURAL_MINOR)!!,
@@ -210,6 +235,67 @@ class PageLayoutTest {
         }
         assertEquals(Page.PLAY, Page.DEFAULT)
         assertTrue("only Projects should work without a project", Page.entries.count { !it.needsProject } == 1)
+    }
+
+    @Test fun theTabPageDoesNotCrash() {
+        // It did: TabPane scrolled vertically and the page wrapped it in another vertical
+        // scroll, which Compose measures with an infinite height constraint and throws
+        // on. Composing the real page is the only way to catch that.
+        val c = composition()
+        val index = mutableStateOf(0)
+        compose.setContent {
+            val (_, size) = sizes[index.value]
+            TabTapTheme {
+                Box(Modifier.size(width = size.first.dp, height = size.second.dp)) {
+                    com.tabtap.app.ui.pages.TabPage(fakeModel(), c.asState())
+                }
+            }
+        }
+        for (i in sizes.indices) {
+            index.value = i
+            compose.waitForIdle()
+        }
+    }
+
+    @Test fun everyPageRendersAtEveryDeviceSize() {
+        // Each page, at each size, composed for real. A page that throws on layout —
+        // which is what the Tab page was doing — fails here rather than on the phone.
+        val c = composition()
+        val model = fakeModel()
+        val page = mutableStateOf(0)
+        val size = mutableStateOf(0)
+        val pages = com.tabtap.app.ui.pages.Page.entries.filter { it.needsProject }
+        compose.setContent {
+            val (_, dims) = sizes[size.value]
+            TabTapTheme {
+                Box(Modifier.size(width = dims.first.dp, height = dims.second.dp)) {
+                    when (pages[page.value]) {
+                        com.tabtap.app.ui.pages.Page.PLAY ->
+                            com.tabtap.app.ui.pages.PlayPage(model, c.asState())
+                        com.tabtap.app.ui.pages.Page.NOTES ->
+                            com.tabtap.app.ui.pages.NotesPage(model, c.asState())
+                        com.tabtap.app.ui.pages.Page.TAP ->
+                            com.tabtap.app.ui.pages.TapRhythmPage(model, c.asState())
+                        com.tabtap.app.ui.pages.Page.HARMONY ->
+                            com.tabtap.app.ui.pages.HarmonyPage(model, c.asState())
+                        com.tabtap.app.ui.pages.Page.TAB ->
+                            com.tabtap.app.ui.pages.TabPage(model, c.asState())
+                        com.tabtap.app.ui.pages.Page.SCORE ->
+                            com.tabtap.app.ui.pages.ScorePage(model, c.asState())
+                        com.tabtap.app.ui.pages.Page.SETUP ->
+                            com.tabtap.app.ui.pages.SetupPage(model, c.asState())
+                        else -> Box(Modifier) {}
+                    }
+                }
+            }
+        }
+        for (p in pages.indices) {
+            page.value = p
+            for (sz in sizes.indices) {
+                size.value = sz
+                compose.waitForIdle()
+            }
+        }
     }
 
     @Test fun theTabPageRendersAtEverySizeAndZoom() {

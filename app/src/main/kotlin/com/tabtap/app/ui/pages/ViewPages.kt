@@ -254,6 +254,49 @@ fun SetupPage(
             onHumanize = { model.humanizeTrack() },
             onLegato = model::makeLegato,
         )
+        // How much fits on the screen. Offered because a phone in landscape is short and
+        // comfort here is a matter of eyesight as much as pixels.
+        com.tabtap.app.ui.components.Panel(title = "Screen") {
+            Column {
+                com.tabtap.app.ui.components.SectionLabel("Everything")
+                Spacer(Modifier.height(spacing.tiny))
+                com.tabtap.app.ui.components.SegmentedControl(
+                    options = listOf(0.8f, 0.9f, 1f, 1.15f, 1.3f),
+                    selected = state.uiScale,
+                    onSelect = model::setUiScale,
+                    label = {
+                        when (it) {
+                            0.8f -> "Tiny"
+                            0.9f -> "Small"
+                            1f -> "Normal"
+                            1.15f -> "Large"
+                            else -> "Largest"
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    compact = true,
+                )
+                Spacer(Modifier.height(spacing.small))
+                com.tabtap.app.ui.components.SectionLabel("Tab and score")
+                Spacer(Modifier.height(spacing.tiny))
+                com.tabtap.app.ui.components.SegmentedControl(
+                    options = listOf(0.75f, 1f, 1.25f, 1.75f, 2.5f),
+                    selected = state.notationScale,
+                    onSelect = model::setNotationScale,
+                    label = {
+                        when (it) {
+                            0.75f -> "Tiny"
+                            1f -> "Small"
+                            1.25f -> "Normal"
+                            1.75f -> "Large"
+                            else -> "Largest"
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    compact = true,
+                )
+            }
+        }
         DisplayPanel(display = state.display, onChange = model::setDisplay)
         Spacer(Modifier.height(spacing.xxLarge))
     }

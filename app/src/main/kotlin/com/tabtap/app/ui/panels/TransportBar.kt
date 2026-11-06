@@ -112,6 +112,9 @@ fun TransportBar(
         // Below this the plus/minus stepper does not fit; the tempo becomes a tappable
         // readout instead, which still reaches tap-tempo and the tempo field.
         val showTempoStepper = width >= 360.dp
+        // Icons alone are a guessing game. Where there is width to spare, every control
+        // carries its name underneath.
+        val showLabels = width >= 700.dp
 
         Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -126,6 +129,10 @@ fun TransportBar(
                 horizontalArrangement = Arrangement.spacedBy(spacing.tiny),
             ) {
                 // The play button is the largest target on the bar, deliberately.
+                LabelledControl(
+                    if (isPlaying) "Pause" else if (isPaused) "Resume" else "Play",
+                    showLabels,
+                ) {
                 Box(
                     Modifier
                         .size(48.dp)
@@ -151,10 +158,13 @@ fun TransportBar(
                         modifier = Modifier.size(26.dp),
                     )
                 }
-                IconToggle(Icons.Default.Stop, "Stop", onClick = onStop)
+                }
+                LabelledControl("Stop", showLabels) {
+                    IconToggle(Icons.Default.Stop, "Stop", onClick = onStop)
+                }
 
                 // The page's name, where there is room for it.
-                if (compact && title != null && width >= 620.dp) {
+                if (compact && title != null && width >= 700.dp) {
                     Spacer(Modifier.width(spacing.small))
                     Text(
                         title,
@@ -164,21 +174,25 @@ fun TransportBar(
                     )
                 }
                 if (showRestart) {
-                    IconToggle(Icons.Default.Replay, "Back to start", onClick = onRestart)
+                    LabelledControl("Start", showLabels) {
+                        IconToggle(Icons.Default.Replay, "Back to start", onClick = onRestart)
+                    }
                 }
                 if (showLoopAndClick) {
                     // Tapping sets the loop; the menu chooses what it covers, because
                     // looping the whole section is as common as looping one bar.
                     Box {
                         var loopMenuOpen by remember { mutableStateOf(false) }
-                        IconToggle(
-                            Icons.Default.Loop,
-                            if (looping) "Loop: ${loopLabel ?: "on"}" else "Loop",
-                            checked = looping,
-                            onClick = {
-                                if (onChooseLoop == null) onToggleLoop() else loopMenuOpen = true
-                            },
-                        )
+                        LabelledControl(if (looping) "Looping" else "Loop", showLabels) {
+                            IconToggle(
+                                Icons.Default.Loop,
+                                if (looping) "Loop: ${loopLabel ?: "on"}" else "Loop",
+                                checked = looping,
+                                onClick = {
+                                    if (onChooseLoop == null) onToggleLoop() else loopMenuOpen = true
+                                },
+                            )
+                        }
                         if (onChooseLoop != null) {
                             DropdownMenu(
                                 expanded = loopMenuOpen,
@@ -196,12 +210,14 @@ fun TransportBar(
                             }
                         }
                     }
-                    IconToggle(
-                        Icons.Default.GraphicEq, "Metronome",
-                        checked = metronomeEnabled,
-                        accent = MusicColors.harmony[0],
-                        onClick = onToggleMetronome,
-                    )
+                    LabelledControl("Click", showLabels) {
+                        IconToggle(
+                            Icons.Default.GraphicEq, "Metronome",
+                            checked = metronomeEnabled,
+                            accent = MusicColors.harmony[0],
+                            onClick = onToggleMetronome,
+                        )
+                    }
                 }
 
                 if (showBeatLamps) {
@@ -273,14 +289,14 @@ fun TransportBar(
 
                 if (showUndoRedo) {
                     Spacer(Modifier.width(spacing.small))
-                    IconToggle(
-                        Icons.Default.Undo, "Undo", enabled = canUndo, onClick = onUndo,
-                    )
-                    IconToggle(
-                        Icons.Default.Redo, "Redo", enabled = canRedo, onClick = onRedo,
-                    )
+                    LabelledControl("Undo", showLabels) {
+                        IconToggle(Icons.Default.Undo, "Undo", enabled = canUndo, onClick = onUndo)
+                    }
+                    LabelledControl("Redo", showLabels) {
+                        IconToggle(Icons.Default.Redo, "Redo", enabled = canRedo, onClick = onRedo)
+                    }
                 }
-                help?.invoke()
+                LabelledControl("Help", showLabels) { help?.invoke() }
             }
 
             // On a narrow screen the loop, click and undo live on their own row.
@@ -351,6 +367,34 @@ fun TransportBar(
             )
         }
     }
+    }
+}
+
+/**
+ * An icon with its name underneath, where the screen is wide enough for it.
+ *
+ * The transport's icons were not clear on their own — several of them are only obvious
+ * once you already know what they do — so in landscape, where there is width going
+ * spare, each one is labelled.
+ */
+@Composable
+private fun LabelledControl(
+    label: String,
+    showLabel: Boolean,
+    content: @Composable () -> Unit,
+) {
+    if (!showLabel) {
+        content()
+        return
+    }
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        content()
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
     }
 }
 

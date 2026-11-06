@@ -42,7 +42,7 @@ class MainActivity : ComponentActivity() {
             )
             viewModel = model
             val state by model.state.collectAsStateWithLifecycle()
-            TabTapTheme(darkTheme = true) {
+            TabTapTheme(darkTheme = true, uiScale = state.uiScale) {
                 TabTapApp(model, state)
             }
         }

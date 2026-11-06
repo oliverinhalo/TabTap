@@ -35,6 +35,10 @@ import com.tabtap.music.notation.ScoreEngraver
 /**
  * The standard-notation view.
  *
+ * This one scrolls itself, so it must be given a bounded height and never be placed
+ * inside another vertical scroll — nesting two is measured with an infinite height
+ * constraint and throws.
+ *
  * Every part is engraved from the same composition the tab and the fretboard show, so
  * the notation is not a rendering of a separate document — editing a fret number in the
  * tab changes the pitch here, and the key signature, accidentals, beaming and rests are

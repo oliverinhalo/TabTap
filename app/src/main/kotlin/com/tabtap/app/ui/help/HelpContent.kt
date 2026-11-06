@@ -33,6 +33,9 @@ object Help {
             "**Notes** — give the line a rhythm. Every note has a length you can change " +
                 "with its − and +, and the strip at the top sets them all at once: tap " +
                 "1/8 and the whole line becomes eighth notes.",
+            "**Tap** — or play the rhythm instead of choosing it. The metronome runs and " +
+                "you tap a pad once per note; each tap plays its note so you hear it come " +
+                "together.",
             "**Setup** — set the key. This never moves your notes; it tells the harmony " +
                 "which scale to follow.",
             "**Harmony** — tap Harmonise. Pick an interval, a 3rd above being the classic " +
@@ -99,15 +102,43 @@ object Help {
                 "The quickest way: on the **Notes** page, tap 1/4, 1/8 or 1/16 at the top " +
                     "to put the whole line on that rhythm.",
                 "For one note only, use the − and + on its row.",
-                "For a rhythm you cannot tap out as a grid, go to **Setup** and record it: " +
-                    "the click runs, you tap the rhythm, then apply it to your notes.",
-                "You can also work the other way round — record a rhythm first, keep it, " +
-                    "then tap notes and each one takes the next slot.",
+                "To play the rhythm rather than choose it, use the **Tap** page: the " +
+                    "metronome runs and you tap a pad once for each note, in time. Each " +
+                    "tap plays its own note, so you hear the rhythm as you build it. " +
+                    "Apply when you are done and the taps are snapped onto the grid.",
+                "You can also work the other way round — record a rhythm in Setup, keep " +
+                    "it, then tap notes and each one takes the next slot.",
             ),
             tips = listOf(
                 "Quantise tidies up timing you played by hand. Strength below 100% tightens " +
                     "it without making it robotic.",
                 "Swing and triplet grids are under Rhythm, along with the count-in.",
+            ),
+        ),
+
+        HelpTopic(
+            id = "tap",
+            title = "Tapping the rhythm",
+            summary = "Play the rhythm with your finger instead of choosing note lengths.",
+            steps = listOf(
+                "Play the notes in first, on the Play page, in the order you want them. " +
+                    "This page needs to know what the notes are before you can tap them out.",
+                "Choose what to snap to — 1/8 and straight suits most things — and whether " +
+                    "you want a count-in.",
+                "Start tapping. The metronome runs, and the pad shows the next note.",
+                "Tap the pad once for each note, in time with the click. Each tap plays " +
+                    "that note, so you are hearing the rhythm you are playing.",
+                "Apply the rhythm. Your taps are snapped onto the grid and given to the " +
+                    "notes, keeping their pitches and their order.",
+            ),
+            tips = listOf(
+                "Chords count as one tap: a stack of notes played together takes a single " +
+                    "tap, and the whole chord sounds.",
+                "Snapping to a coarser grid like 1/8 forgives more; 1/16 keeps more of " +
+                    "what you actually played.",
+                "If you tap more times than there are notes the extra taps are ignored, " +
+                    "and the pad tells you when every note has been tapped.",
+                "Nothing is changed until you press Apply, so a bad take costs nothing.",
             ),
         ),
 

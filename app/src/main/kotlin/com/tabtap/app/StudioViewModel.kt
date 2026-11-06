@@ -95,6 +95,13 @@ data class RhythmRecording(
     val onsets: List<Long> = emptyList(),
     /** Raw tap times in milliseconds, for tap tempo. */
     val tapTimesMs: List<Long> = emptyList(),
+    /**
+     * How many of the track's notes have been tapped out so far.
+     *
+     * Tapping the rhythm plays the notes you already entered, one per tap, in order —
+     * so this is both the cursor through the sequence and the count of taps.
+     */
+    val noteCursor: Int = 0,
 ) {
     val tapCount: Int get() = onsets.size
 }
@@ -186,6 +193,13 @@ data class StudioUiState(
     val focusFretboard: Boolean = false,
     /** How much room is on the output. */
     val reverbMix: Float = 0.16f,
+    /**
+     * Overall size of the interface, 1.0 being the default.
+     *
+     * A phone in landscape has very little height, and how much information fits
+     * comfortably is a matter of eyesight as much as pixels, so it is a setting.
+     */
+    val uiScale: Float = 1f,
     val isLoading: Boolean = false,
 ) {
     val activeTrack: Track? get() = composition.activeTrack
@@ -441,13 +455,42 @@ class StudioViewModel(
     private fun publish(composition: Composition, rebuildBuses: Boolean = false) {
         // Drop selections that refer to notes which no longer exist.
         val liveIds = composition.tracks.flatMap { t -> t.notes.map { it.id } }.toSet()
+        val wasPlaying = _state.value.isPlaying
         _state.value = _state.value.copy(
             composition = composition,
             selectedNoteIds = _state.value.selectedNoteIds.intersect(liveIds),
         )
         refreshUndoFlags()
         if (rebuildBuses) engine.prepare(composition) else engine.updateMix(composition)
+
+        // An edit made while the transport is running is heard straight away, without
+        // having to stop and start again.
+        if (wasPlaying) rescheduleWhilePlaying(composition)
+
         saveRequests.value = composition
+    }
+
+    /**
+     * Rebuild the schedule from the edited composition and hand it to the engine without
+     * interrupting playback.
+     *
+     * The schedule always starts at the loop's beginning, or at tick zero, so the frame
+     * the playhead is on maps to the same musical position in the new schedule and the
+     * swap is inaudible.
+     */
+    private fun rescheduleWhilePlaying(composition: Composition) {
+        val state = _state.value
+        val schedule = Sequencer.build(
+            composition = composition,
+            sampleRate = engine.engineSampleRate,
+            fromTick = state.loop?.startTick ?: 0L,
+            toTick = null,
+            countInBars = 0,
+            metronome = state.metronomeEnabled,
+            metronomeLevel = state.metronomeLevel,
+            includeChords = !state.chordsMuted,
+        )
+        engine.replaceSchedule(schedule)
     }
 
     private fun refreshUndoFlags() {
@@ -474,6 +517,10 @@ class StudioViewModel(
     }
 
     // ---------------------------------------------------------------- view options
+
+    fun setUiScale(scale: Float) {
+        _state.value = _state.value.copy(uiScale = scale.coerceIn(0.8f, 1.4f))
+    }
 
     fun setNotationScale(scale: Float) {
         _state.value = _state.value.copy(notationScale = scale.coerceIn(0.7f, 2.6f))
@@ -855,6 +902,9 @@ class StudioViewModel(
 
     fun setMetronomeEnabled(enabled: Boolean) {
         _state.value = _state.value.copy(metronomeEnabled = enabled)
+        // Turning the click on or off mid-playback needs the schedule rebuilt, because
+        // the clicks are scheduled events like any other.
+        if (_state.value.isPlaying) rescheduleWhilePlaying(_state.value.composition)
     }
 
     fun setMetronomeLevel(level: Float) {
@@ -867,6 +917,8 @@ class StudioViewModel(
     }
 
     fun setTempo(bpm: Double) {
+        // The edit goes through publish, which reschedules if the transport is running,
+        // so dragging the tempo while playing changes the tempo as you drag.
         edit("Set tempo", coalesceKey = "tempo") { CompositionEditor.setTempo(it, bpm) }
     }
 
@@ -903,25 +955,65 @@ class StudioViewModel(
      */
     fun startRhythmRecording() {
         val state = _state.value
+        if ((state.activeTrack?.notes?.size ?: 0) == 0) {
+            emit("Play some notes in first, then tap their rhythm")
+            return
+        }
         _state.value = state.copy(recording = RhythmRecording(isRecording = true))
+        // The metronome runs on its own: the notes are sounded by your taps, so playing
+        // the track as well would mean hearing the old rhythm over the new one.
         playInternal(
             fromTick = 0L,
             metronome = true,
             countInBars = state.countInBars,
-            includeTracks = true,
+            includeTracks = false,
         )
     }
 
-    /** Record one rhythm tap at the current playhead, with no pitch. */
+    /**
+     * One tap of the rhythm.
+     *
+     * Plays the next note of the sequence and records when the tap happened. That is the
+     * whole point: you have already told it which notes and in which order, so tapping
+     * out the rhythm should sound the music as you tap it, not a click — otherwise you
+     * are tapping blind and cannot tell whether the rhythm fits.
+     */
     fun recordRhythmTap() {
         val state = _state.value
         if (!state.recording.isRecording) return
         val tick = state.playback.tick
+        val stacks = noteStacks(state)
+        val cursor = state.recording.noteCursor
+
+        // Sound the note (or the chord) this tap belongs to.
+        val pitches = stacks.getOrNull(cursor)
+        if (pitches != null) {
+            engine.setPreviewVoice(state.activeTrack?.voice ?: InstrumentVoice.ELECTRIC_CLEAN)
+            engine.preview(pitches, velocity = 0.85f)
+        } else {
+            // Past the end of the sequence there is nothing to play, so mark the beat.
+            engine.previewClick(accented = false)
+        }
+
         _state.value = state.copy(
-            recording = state.recording.copy(onsets = state.recording.onsets + tick),
+            recording = state.recording.copy(
+                onsets = state.recording.onsets + tick,
+                noteCursor = cursor + 1,
+            ),
         )
-        engine.previewClick(accented = false)
     }
+
+    /** The track's notes grouped into chords, in playing order. */
+    private fun noteStacks(state: StudioUiState): List<List<Int>> =
+        state.activeTrack?.notes
+            ?.groupBy { it.startTick }
+            ?.toSortedMap()
+            ?.values
+            ?.map { group -> group.map { it.pitch } }
+            ?: emptyList()
+
+    /** How many stacks of notes there are to tap out, and how many are left. */
+    fun rhythmStackCount(): Int = noteStacks(_state.value).size
 
     /** Record a tap that carries both a pitch and a time. */
     private fun recordTapAt(string: Int, fret: Int) {
@@ -961,11 +1053,14 @@ class StudioViewModel(
             emit("No taps were recorded")
             return
         }
-        val quantized = RhythmEngine.quantizeStarts(onsets, state.quantize, state.composition.timeSignature)
+        val quantized = RhythmEngine.quantizeStarts(
+            onsets, state.quantize, state.composition.timeSignature,
+        )
         edit("Apply tapped rhythm") {
             CompositionEditor.applyTappedRhythm(it, trackId, quantized, state.entryValue.ticks)
         }
-        emit("Applied a ${onsets.size}-tap rhythm")
+        val grid = state.quantize.resolution.displayName
+        emit("Applied a ${onsets.size}-tap rhythm, quantised to $grid")
     }
 
     /**

@@ -324,6 +324,48 @@ class AudioEngine {
     }
 
     /**
+     * Swap in a new schedule while playback continues.
+     *
+     * An edit made during playback should be heard without stopping and starting again.
+     * The playhead is converted to a musical tick against the old schedule and back to a
+     * frame against the new one — so a tempo change moves the playhead to the right
+     * place rather than jumping — and the event cursor is positioned past everything
+     * already due. Voices are deliberately left alone: notes already sounding ring on,
+     * which is what makes the swap inaudible.
+     */
+    fun replaceSchedule(newSchedule: Schedule) {
+        synchronized(this) {
+            val previous = schedule
+            if (transport.value == TransportState.STOPPED) {
+                schedule = newSchedule
+                nextEventIndex = 0
+                return
+            }
+            val currentFrame = playFrame.get()
+            val stillCountingIn = currentFrame < previous.countInFrames
+
+            val frame = if (stillCountingIn) {
+                // Keep whatever is left of the count-in rather than restarting it.
+                (newSchedule.countInFrames - (previous.countInFrames - currentFrame))
+                    .coerceAtLeast(0L)
+            } else {
+                // Where we are musically, according to the schedule that is playing.
+                newSchedule.frameAtTick(previous.tickAtFrame(currentFrame))
+            }
+
+            schedule = newSchedule
+            playFrame.set(frame)
+            nextEventIndex = newSchedule.events.indexOfFirst { it.frame >= frame }
+                .let { if (it < 0) newSchedule.events.size else it }
+            // Loop boundaries are frames, so they move with the new schedule.
+            loop?.let { region ->
+                loopStartFrame = newSchedule.frameAtTick(region.startTick)
+                loopEndFrame = newSchedule.frameAtTick(region.endTick)
+            }
+        }
+    }
+
+    /**
      * Pause, leaving the position where it is.
      *
      * Sounding notes are silenced rather than left ringing: a paused transport that keeps
