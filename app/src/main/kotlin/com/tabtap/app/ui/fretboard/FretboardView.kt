@@ -92,7 +92,17 @@ fun FretboardView(
 ) {
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
-    var geometry by remember { mutableStateOf<FretboardGeometry?>(null) }
+
+    /**
+     * The geometry from the last draw, for hit testing.
+     *
+     * Deliberately a plain holder rather than `mutableStateOf`: the geometry is computed
+     * in the draw phase, and writing snapshot state from there invalidates everything
+     * reading it, which recomposes, which draws again — the fretboard never went idle
+     * and eventually exhausted the heap. A plain field is read by the gesture handlers
+     * and observed by nothing.
+     */
+    val geometryHolder = remember { GeometryHolder() }
 
     // Clamp the window whenever the board changes under it.
     LaunchedEffect(fretboard.fretCount, display.visibleFretCount, display.firstVisibleFret) {
@@ -144,7 +154,7 @@ fun FretboardView(
                         while (anyDown) {
                             for (change in event.changes) {
                                 if (change.pressed && known.add(change.id.value)) {
-                                    val g = geometry ?: continue
+                                    val g = geometryHolder.value ?: continue
                                     val hit = g.hitTest(change.position) ?: continue
                                     onTap(hit.first, hit.second, pointersSeen > 0)
                                     pointersSeen++
@@ -162,7 +172,7 @@ fun FretboardView(
                     // along it. On a 24-fret board a phone cannot show every fret at a
                     // usable size, so the window is part of the instrument.
                     detectTransformGestures(panZoomLock = true) { _, pan, zoom, _ ->
-                        val g = geometry ?: return@detectTransformGestures
+                        val g = geometryHolder.value ?: return@detectTransformGestures
                         var count = display.visibleFretCount
                         var firstFret = display.firstVisibleFret
                         if (abs(zoom - 1f) > 0.01f) {
@@ -194,11 +204,16 @@ fun FretboardView(
                     numberHeightPx = with(density) { 20.dp.toPx() },
                     openColumnPx = with(density) { 34.dp.toPx() },
                 )
-                geometry = g
+                geometryHolder.value = g
                 drawFretboard(g, fretboard, key, marks, display, sounding, measurer)
             }
         }
     }
+}
+
+/** A mutable, non-observable holder, so writing to it from the draw phase is inert. */
+class GeometryHolder {
+    var value: FretboardGeometry? = null
 }
 
 /**
@@ -273,8 +288,12 @@ class FretboardGeometry(
      * Normalised x position (0..1 across the visible window) of fret [n]'s wire, using
      * the real fret spacing of the whole neck so the window shows true proportions.
      */
+    /** Cached: this was being recomputed for every fret of every string, every frame. */
+    private val layout: DoubleArray by lazy(LazyThreadSafetyMode.NONE) {
+        Fretboard.fretLayout(totalFrets)
+    }
+
     private fun fretFraction(n: Int): Float {
-        val layout = Fretboard.fretLayout(totalFrets)
         // The window is laid out from the wire *before* its first fret, so that first
         // fret has a span of its own to be tapped in. Without it the leftmost fret in a
         // scrolled window was zero pixels wide and the fret after it absorbed the taps.

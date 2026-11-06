@@ -3,14 +3,19 @@ package com.tabtap.app
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -190,7 +195,12 @@ class PageLayoutTest {
         compose.setContent {
             val (_, size) = sizes[index.value]
             TabTapTheme {
-                Box(Modifier.size(width = size.first.dp, height = size.second.dp)) {
+                // `requiredWidth` rather than `width`: the test host's window is narrower
+                // than any of these devices, and a plain `width` is capped by it, so the
+                // bar was being laid out at about 280dp however wide the device was
+                // supposed to be. Overflow is then checked against the bar's own width
+                // below rather than against the window.
+                Box(Modifier.requiredWidth(size.first.dp)) {
                     TransportBar(
                         isPlaying = true, isPaused = false, positionTick = 3840L,
                         countInBeatsRemaining = 0, bpm = 132.0,
@@ -208,13 +218,54 @@ class PageLayoutTest {
         for (i in sizes.indices) {
             index.value = i
             compose.waitForIdle()
-            // Pause, stop, the position and the tempo are reachable at every size.
-            compose.onNodeWithContentDescription("Pause").assertIsDisplayed()
-            compose.onNodeWithContentDescription("Stop").assertIsDisplayed()
-            compose.onNodeWithText("2.1.00").assertIsDisplayed()
-            compose.onNodeWithText("132").assertIsDisplayed()
-            // And so is the loop, which used to vanish below 420dp.
-            compose.onNodeWithContentDescription("Loop: all 2 bars").assertIsDisplayed()
+            val (name, size) = sizes[i]
+            val density = compose.density.density
+            var deepest = 0f
+
+            // Every control has to be there, have a real size, and sit inside the bar.
+            // Redo used to be measured to zero width and undo was half cut off.
+            for (description in listOf(
+                "Pause", "Stop", "Back to start", "Loop: all 2 bars", "Metronome",
+                "Undo", "Redo",
+            )) {
+                val nodes = compose
+                    .onAllNodesWithContentDescription(description)
+                    .fetchSemanticsNodes()
+                assertTrue("$name: \"$description\" is missing", nodes.isNotEmpty())
+                val bounds = nodes[0].boundsInRoot
+                assertTrue(
+                    "$name: \"$description\" has no size ($bounds)",
+                    bounds.width > 1f && bounds.height > 1f,
+                )
+                assertTrue(
+                    "$name: \"$description\" overflows the bar ($bounds)",
+                    bounds.right / density <= size.first + 0.5f,
+                )
+                deepest = maxOf(deepest, bounds.bottom / density)
+            }
+
+            // The position and the tempo are readable at every size.
+            assertTrue(
+                "$name: no position readout",
+                compose.onAllNodesWithText("2.1.00").fetchSemanticsNodes().isNotEmpty(),
+            )
+            assertTrue(
+                "$name: no tempo readout",
+                compose.onAllNodesWithText("132").fetchSemanticsNodes().isNotEmpty(),
+            )
+
+            // Wrapping onto a second line is allowed - at 360dp the controls cannot fit
+            // on one - but the bar must not eat the page: a phone in landscape has
+            // around 412dp of height in total and the fretboard needs most of it.
+            // In landscape, height is the scarce dimension and the bar must stay
+            // shallow. In portrait it may take the three lines it needs.
+            val landscape = size.first > size.second
+            val allowed = if (landscape) 88f else 132f
+            println("TRANSPORT $name: ${deepest}dp deep (allowed $allowed)")
+            assertTrue(
+                "$name: the transport is ${deepest}dp deep at ${size.first}x${size.second}dp",
+                deepest <= allowed,
+            )
         }
     }
 

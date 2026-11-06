@@ -1,6 +1,8 @@
 package com.tabtap.app.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -76,12 +79,34 @@ fun ProjectsScreen(
     onImport: () -> Unit,
 ) {
     val spacing = LocalSpacing.current
-    var showNewDialog by remember { mutableStateOf(false) }
+    var showNewProject by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<ProjectSummary?>(null) }
     var deleting by remember { mutableStateOf<ProjectSummary?>(null) }
     var showHelp by remember { mutableStateOf(false) }
 
-    Column(modifier.fillMaxSize()) {
+    // The new-project form takes over the whole screen rather than opening a dialog.
+    //
+    // Two reasons. A dialog on a 412dp-tall landscape phone leaves a form of eight
+    // sections about 200dp to live in, which is unusable. And a text field inside a
+    // Compose dialog window re-measures without ever settling: the dialog sizes itself
+    // to its content while the field re-reports its layout, and the two never agree, so
+    // the app re-laid out forever and ran itself out of memory. Keeping every text
+    // field in the main window is what fixes that, not a cleverer dialog.
+    if (showNewProject) {
+        NewProjectForm(
+            onDismiss = { showNewProject = false },
+            onCreate = { name, family, tuning, bpm, key, timeSignature ->
+                showNewProject = false
+                model.createProject(name, family, tuning, bpm, key, timeSignature) { id ->
+                    onOpen(id)
+                }
+            },
+        )
+        return
+    }
+
+    Box(modifier.fillMaxSize()) {
+      Column(Modifier.fillMaxSize()) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -108,7 +133,7 @@ fun ProjectsScreen(
             com.tabtap.app.ui.help.HelpButton("start")
             OutlinedButton(onClick = onImport) { Text("Import") }
             Spacer(Modifier.width(spacing.small))
-            Button(onClick = { showNewDialog = true }) { Text("New project") }
+            Button(onClick = { showNewProject = true }) { Text("New project") }
         }
 
         if (projects.isEmpty()) {
@@ -118,7 +143,7 @@ fun ProjectsScreen(
                     "give it a rhythm and harmonise it.",
                 action = {
                     Row(horizontalArrangement = Arrangement.spacedBy(spacing.small)) {
-                        Button(onClick = { showNewDialog = true }) { Text("New project") }
+                        Button(onClick = { showNewProject = true }) { Text("New project") }
                         OutlinedButton(onClick = { showHelp = true }) { Text("How it works") }
                     }
                 },
@@ -144,6 +169,7 @@ fun ProjectsScreen(
                 }
             }
         }
+      }
     }
 
     if (showHelp) {
@@ -153,41 +179,51 @@ fun ProjectsScreen(
         )
     }
 
-    if (showNewDialog) {
-        NewProjectDialog(
-            onDismiss = { showNewDialog = false },
-            onCreate = { name, family, tuning, bpm, key, timeSignature ->
-                showNewDialog = false
-                model.createProject(name, family, tuning, bpm, key, timeSignature) { id ->
-                    onOpen(id)
-                }
-            },
-        )
-    }
-
     renaming?.let { project ->
         var text by remember(project.id) { mutableStateOf(project.name) }
-        AlertDialog(
-            onDismissRequest = { renaming = null },
-            title = { Text("Rename project") },
-            text = {
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    label = { Text("Name") },
-                    singleLine = true,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    model.renameProject(project.id, text)
-                    renaming = null
-                }) { Text("Rename") }
-            },
-            dismissButton = {
-                TextButton(onClick = { renaming = null }) { Text("Cancel") }
-            },
-        )
+        // In the main window, for the same reason as the new-project form: a text field
+        // in a dialog window never settles its layout.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.6f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { renaming = null },
+            contentAlignment = Alignment.Center,
+        ) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp,
+                modifier = Modifier.widthIn(max = 420.dp).padding(spacing.large),
+            ) {
+                Column(Modifier.padding(spacing.large)) {
+                    Text("Rename project", style = MaterialTheme.typography.titleLarge)
+                    Spacer(Modifier.height(spacing.medium))
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it },
+                        label = { Text("Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(spacing.medium))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = { renaming = null }) { Text("Cancel") }
+                        Spacer(Modifier.width(spacing.small))
+                        Button(onClick = {
+                            model.renameProject(project.id, text)
+                            renaming = null
+                        }) { Text("Rename") }
+                    }
+                }
+            }
+        }
     }
 
     deleting?.let { project ->
@@ -295,7 +331,7 @@ private fun ProjectRow(
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun NewProjectDialog(
+private fun NewProjectForm(
     onDismiss: () -> Unit,
     onCreate: (String, InstrumentFamily, Tuning, Double, Key, TimeSignature) -> Unit,
 ) {
@@ -311,14 +347,42 @@ private fun NewProjectDialog(
 
     val presets = Tunings.presetsFor(family, stringCount)
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("New project") },
-        text = {
-            Column(
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+      Column(Modifier.fillMaxSize()) {
+        // The header carries the actions. In landscape the form scrolls, and buttons at
+        // the bottom of a scrolling form are the ones players never find.
+        Row(
+            Modifier.fillMaxWidth().padding(spacing.large),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "New project",
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+            Spacer(Modifier.width(spacing.small))
+            Button(
+                onClick = {
+                    onCreate(
+                        name.ifBlank { "Untitled" },
+                        family,
+                        tuning,
+                        bpm.toDouble(),
+                        Key.of(tonic, scale) ?: Key.C_MAJOR,
+                        timeSignature,
+                    )
+                },
+            ) { Text("Create") }
+        }
+
+        Column(
                 Modifier
                     .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = spacing.large)
+                    .padding(bottom = spacing.large),
                 verticalArrangement = Arrangement.spacedBy(spacing.medium),
             ) {
                 OutlinedTextField(
@@ -431,23 +495,8 @@ private fun NewProjectDialog(
                     }
                 }
             }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    onCreate(
-                        name.ifBlank { "Untitled" },
-                        family,
-                        tuning,
-                        bpm.toDouble(),
-                        Key.of(tonic, scale) ?: Key.C_MAJOR,
-                        timeSignature,
-                    )
-                },
-            ) { Text("Create") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+      }
+    }
 }
 
 /** "3 minutes ago", "yesterday", or a date for anything older than a week. */

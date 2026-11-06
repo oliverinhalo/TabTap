@@ -37,10 +37,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -86,7 +92,8 @@ fun TabTapApp(
     val scope = rememberCoroutineScope()
     val projects by model.projects.collectAsState()
     val snackbar = remember { SnackbarHostState() }
-    var page by remember { mutableStateOf(Page.PROJECTS) }
+    val pageState = remember { mutableStateOf(Page.PROJECTS) }
+    var page by pageState
     var importing by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -124,8 +131,24 @@ fun TabTapApp(
         }
     }
 
-    fun go(destination: Page) {
-        page = if (destination.needsProject && state.projectId == null) Page.PROJECTS else destination
+    val hasProject = state.projectId != null
+
+    // Navigation reads whether a project is open through a state holder rather than
+    // capturing it.
+    //
+    // `fun go(..)` captured the `state` of the composition that created it. The strip is
+    // not recomposed on every state change, so it kept calling the first version, which
+    // had been created before any project existed - and so every tap on a page sent the
+    // player back to the project list with the project sitting open behind it.
+    val projectIsOpen = rememberUpdatedState(hasProject)
+    val go = remember {
+        { destination: Page ->
+            pageState.value = if (destination.needsProject && !projectIsOpen.value) {
+                Page.PROJECTS
+            } else {
+                destination
+            }
+        }
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -139,9 +162,9 @@ fun TabTapApp(
                 if (!landscape) {
                     PageStrip(
                         current = page,
-                        enabled = { !it.needsProject || state.projectId != null },
+                        hasProject = hasProject,
                         vertical = false,
-                        onSelect = ::go,
+                        onSelect = go,
                     )
                 }
             },
@@ -150,9 +173,9 @@ fun TabTapApp(
                 if (landscape) {
                     PageStrip(
                         current = page,
-                        enabled = { !it.needsProject || state.projectId != null },
+                        hasProject = hasProject,
                         vertical = true,
-                        onSelect = ::go,
+                        onSelect = go,
                     )
                 }
 
@@ -252,7 +275,7 @@ fun TabTapApp(
 @Composable
 private fun PageStrip(
     current: Page,
-    enabled: (Page) -> Boolean,
+    hasProject: Boolean,
     vertical: Boolean,
     onSelect: (Page) -> Unit,
 ) {
@@ -270,7 +293,11 @@ private fun PageStrip(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 for (destination in Page.entries) {
-                    PageButton(destination, destination == current, enabled(destination)) {
+                    PageButton(
+                        destination,
+                        destination == current,
+                        !destination.needsProject || hasProject,
+                    ) {
                         onSelect(destination)
                     }
                 }
@@ -284,7 +311,11 @@ private fun PageStrip(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 for (destination in Page.entries) {
-                    PageButton(destination, destination == current, enabled(destination)) {
+                    PageButton(
+                        destination,
+                        destination == current,
+                        !destination.needsProject || hasProject,
+                    ) {
                         onSelect(destination)
                     }
                 }
@@ -301,6 +332,7 @@ private fun PageButton(
     onClick: () -> Unit,
 ) {
     val colors = LocalTabTapColors.current
+    val isSelected = selected
     val tint = when {
         !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
         selected -> MaterialTheme.colorScheme.primary
@@ -319,6 +351,14 @@ private fun PageButton(
                 RoundedCornerShape(10.dp),
             )
             .clickable(enabled = enabled, onClick = onClick)
+            // One node per destination, named the same way a screen reader would say it.
+            // Picking a page out by its short label alone matched text elsewhere on the
+            // page, which made navigation ambiguous both for tests and for TalkBack.
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Go to ${page.title}"
+                role = Role.Tab
+                this.selected = isSelected
+            }
             .padding(vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

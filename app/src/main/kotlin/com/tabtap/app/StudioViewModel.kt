@@ -244,11 +244,19 @@ data class StudioUiState(
     val selectedNotes: List<MusicNote>
         get() = activeTrack?.notes?.filter { it.id in selectedNoteIds } ?: emptyList()
 
-    /** Available chord voicings for the chord editor's current chord. */
-    val chordVoicings: List<ChordVoicing>
-        get() = chordEditor.chord?.let {
+    /**
+     * Available chord voicings for the chord editor's current chord.
+     *
+     * Computed once per state, not on every read. The voicing search is exhaustive over
+     * a sliding fret window and allocates thousands of candidates; as a plain getter on
+     * the state it ran on every recomposition of the chord screen, which was slow enough
+     * to exhaust the heap.
+     */
+    val chordVoicings: List<ChordVoicing> by lazy(LazyThreadSafetyMode.NONE) {
+        chordEditor.chord?.let {
             com.tabtap.music.ChordVoicer.voicings(it, fretboard, maxResults = 8)
         } ?: emptyList()
+    }
 }
 
 /**

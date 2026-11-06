@@ -40,6 +40,24 @@ abstract class TabTapDatabase : RoomDatabase() {
                 // schema change is never an acceptable outcome.
                 .build()
 
+        /**
+         * Forget the open database and delete its files.
+         *
+         * Only for tests: the singleton outlives a single test in a shared JVM, so
+         * without this one test's projects turn up in the next one's library, and the
+         * app opens the most recent project instead of showing an empty list.
+         */
+        fun resetForTests(context: Context) {
+            synchronized(this) {
+                instance?.close()
+                instance = null
+            }
+            val app = context.applicationContext
+            for (suffix in listOf("", "-wal", "-shm", "-journal")) {
+                app.getDatabasePath(NAME + suffix).delete()
+            }
+        }
+
         /** An in-memory database, for tests. */
         fun inMemory(context: Context): TabTapDatabase =
             Room.inMemoryDatabaseBuilder(context, TabTapDatabase::class.java)

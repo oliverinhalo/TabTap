@@ -1,7 +1,6 @@
 package com.tabtap.app.ui.components
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -443,8 +442,15 @@ fun TrackDot(color: Color, size: Dp = 10.dp, modifier: Modifier = Modifier) {
 /** A fading progress indicator used while a long operation runs. */
 @Composable
 fun SubtleBusyIndicator(visible: Boolean, modifier: Modifier = Modifier) {
-    val alpha by animateFloatAsState(if (visible) 1f else 0f, tween(150), label = "busy")
-    Box(modifier.alpha(alpha)) {
+    // The indicator is only composed while something is actually loading. An
+    // indeterminate progress indicator animates for as long as it exists, so leaving
+    // one in the tree permanently keeps Compose from ever going idle - which stalls
+    // instrumentation and burns battery for a bar nobody can see.
+    if (!visible) {
+        Box(modifier.fillMaxWidth().height(2.dp))
+        return
+    }
+    Box(modifier) {
         androidx.compose.material3.LinearProgressIndicator(
             modifier = Modifier.fillMaxWidth().height(2.dp),
             color = MaterialTheme.colorScheme.primary,

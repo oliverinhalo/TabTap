@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.tabtap.app.MainActivity
 import com.tabtap.app.R
@@ -32,7 +33,19 @@ class PlaybackService : Service() {
                 stopForegroundCompat()
                 stopSelf()
             }
-            else -> startForeground(NOTIFICATION_ID, buildNotification())
+            else -> {
+                // From Android 12 this can throw if the app is not in a state that is
+                // allowed to start a foreground service, and on 14 and later the
+                // media-playback type has its own prerequisites. None of that is worth
+                // crashing over: the service only exists to stop the system throttling
+                // the audio thread, and playback works without it.
+                try {
+                    startForeground(NOTIFICATION_ID, buildNotification())
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not start the playback service; carrying on without it", e)
+                    stopSelf()
+                }
+            }
         }
         return START_NOT_STICKY
     }
@@ -85,6 +98,7 @@ class PlaybackService : Service() {
     }
 
     companion object {
+        private const val TAG = "PlaybackService"
         private const val CHANNEL_ID = "tabtap_playback"
         private const val NOTIFICATION_ID = 1
         private const val ACTION_STOP = "com.tabtap.app.STOP_PLAYBACK"

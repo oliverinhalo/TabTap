@@ -73,9 +73,21 @@ class AudioEngine {
      */
     private val reverb = Reverb(sampleRate)
 
-    /** One bus per track, plus one for fretboard previews. */
-    private var buses: Array<InstrumentBus> = arrayOf()
-    private var mixes: Array<BusMix> = arrayOf()
+    /**
+     * One bus per track, plus one for fretboard previews.
+     *
+     * Replaced wholesale when the track list changes, which happens on the UI thread
+     * while the render thread is reading it. They are volatile, and the render thread
+     * takes a single snapshot of the pair per block: reading `buses` twice — once for
+     * its indices and once to index it — could otherwise see two different arrays and
+     * run off the end of a shorter one, which on the audio thread kills the process.
+     */
+    @Volatile private var mixer: Mixer = Mixer(emptyArray(), emptyArray())
+
+    /** The buses and their mix settings, swapped together so they cannot disagree. */
+    private class Mixer(val buses: Array<InstrumentBus>, val mixes: Array<BusMix>) {
+        val size: Int get() = minOf(buses.size, mixes.size)
+    }
     private val previewBus = InstrumentBus(sampleRate, maxVoices = 10)
     private val previewMix = BusMix(gain = 0.85f)
     private val clicks = Array(4) { ClickVoice(sampleRate) }
@@ -87,7 +99,13 @@ class AudioEngine {
     /** The schedule being played. Replaced atomically; the render thread reads the ref. */
     @Volatile private var schedule: Schedule = Schedule.EMPTY
 
-    /** Index of the next event in [schedule] the render thread has yet to process. */
+    /**
+     * Index of the next event in [schedule] the render thread has yet to process.
+     *
+     * Volatile because the UI thread rewrites it when the schedule is swapped or the
+     * transport seeks, and the render thread reads it every block.
+     */
+    @Volatile
     private var nextEventIndex = 0
 
     private val playFrame = AtomicLong(0L)
@@ -140,6 +158,7 @@ class AudioEngine {
     @Synchronized
     fun start(): Boolean {
         if (track != null) return true
+        renderFailure = null
         val minBytes = AudioTrack.getMinBufferSize(
             sampleRate,
             AudioFormat.CHANNEL_OUT_STEREO,
@@ -215,7 +234,7 @@ class AudioEngine {
             track?.release()
         }
         track = null
-        buses.forEach { it.panic() }
+        mixer.buses.forEach { it.panic() }
         previewBus.panic()
         clicks.forEach { it.kill() }
         transport.value = TransportState.STOPPED
@@ -238,13 +257,19 @@ class AudioEngine {
             } else {
                 emptyList()
             }
-        if (buses.size != voices.size) {
-            buses.forEach { it.panic() }
-            buses = Array(voices.size) { InstrumentBus(sampleRate) }
-            mixes = Array(voices.size) { BusMix() }
+        var current = mixer
+        if (current.buses.size != voices.size) {
+            current.buses.forEach { it.panic() }
+            // Built fully, then published in one volatile write, so the render thread
+            // never sees a half-built mixer.
+            current = Mixer(
+                buses = Array(voices.size) { InstrumentBus(sampleRate) },
+                mixes = Array(voices.size) { BusMix() },
+            )
         }
         chordBusPresent = composition.chordProgression.isNotEmpty()
-        voices.forEachIndexed { i, v -> buses[i].configure(v) }
+        voices.forEachIndexed { i, v -> current.buses[i].configure(v) }
+        mixer = current
         updateMix(composition)
     }
 
@@ -253,16 +278,17 @@ class AudioEngine {
      * at the next buffer, so muting a track is immediate.
      */
     fun updateMix(composition: Composition) {
+        val current = mixer
         val audible = composition.audibleTracks.map { it.id }.toSet()
         composition.tracks.forEachIndexed { i, track ->
-            val mix = mixes.getOrNull(i) ?: return@forEachIndexed
+            val mix = current.mixes.getOrNull(i) ?: return@forEachIndexed
             mix.gain = track.volume.coerceIn(0f, 1.5f)
             mix.pan = track.pan.coerceIn(-1f, 1f)
             mix.audible = track.id in audible
         }
         // The chord bus follows the project rather than a track.
         if (composition.chordProgression.isNotEmpty()) {
-            mixes.getOrNull(composition.tracks.size)?.let {
+            current.mixes.getOrNull(composition.tracks.size)?.let {
                 it.gain = 0.6f
                 it.pan = 0f
                 it.audible = chordsAudible && composition.tracks.none { t -> t.soloed }
@@ -282,8 +308,9 @@ class AudioEngine {
     fun setChordsAudible(audible: Boolean) {
         chordsAudible = audible
         // The chord bus is the one after the last track, when there is one.
-        if (buses.isNotEmpty() && mixes.size == buses.size) {
-            mixes.lastOrNull()?.let { if (chordBusPresent) it.audible = audible }
+        val current = mixer
+        if (chordBusPresent && current.size > 0) {
+            current.mixes.lastOrNull()?.audible = audible
         }
     }
 
@@ -416,7 +443,7 @@ class AudioEngine {
 
     private fun releaseAll() {
         // Release rather than kill, so a pause fades rather than clicks.
-        for (bus in buses) {
+        for (bus in mixer.buses) {
             // The bus has no list of keys, so a panic is the only way to be certain; a
             // paused transport simply stops issuing note-ons and lets the tails ring.
             bus.panic()
@@ -459,12 +486,38 @@ class AudioEngine {
         // Events queued from the UI, pulled into a local list each block.
         val immediate = ArrayList<ScheduledEvent>(16)
 
+        // An uncaught exception on this thread would take the whole process down with
+        // it, turning any arithmetic slip in the DSP into a crash of the app rather than
+        // a loss of sound. Silence is recoverable; a crash is not.
+        try {
+            renderBlocks(output, immediate)
+        } catch (e: Throwable) {
+            Log.e(TAG, "The audio render thread failed; stopping playback", e)
+            running.set(false)
+            runCatching {
+                mixer.buses.forEach { it.panic() }
+                previewBus.panic()
+                clicks.forEach { it.kill() }
+            }
+            transport.value = TransportState.STOPPED
+            renderFailure = e.message ?: e::class.java.simpleName
+        }
+    }
+
+    /** Set when the render thread has died, so the UI can say so rather than go quiet. */
+    @Volatile
+    var renderFailure: String? = null
+        private set
+
+    private fun renderBlocks(output: AudioTrack, immediate: ArrayList<ScheduledEvent>) {
         while (running.get()) {
             val frames = blockFrames
+            // One snapshot per block: the pair cannot change under us mid-render.
+            val snapshot = mixer
             java.util.Arrays.fill(mixBuffer, 0f)
 
             if (panicRequested.getAndSet(false)) {
-                buses.forEach { it.panic() }
+                snapshot.buses.forEach { it.panic() }
                 previewBus.panic()
                 clicks.forEach { it.kill() }
                 immediateEvents.clear()
@@ -474,7 +527,7 @@ class AudioEngine {
             val seek = pendingSeek.getAndSet(NO_SEEK)
             if (seek != NO_SEEK) {
                 playFrame.set(seek)
-                buses.forEach { it.panic() }
+                snapshot.buses.forEach { it.panic() }
                 synchronized(this) {
                     nextEventIndex = schedule.events.indexOfFirst { it.frame >= seek }
                         .let { if (it < 0) schedule.events.size else it }
@@ -501,11 +554,11 @@ class AudioEngine {
             }
             renderImmediate(immediate, deviceBlockStart, frames)
 
-            // Render each bus into the mix.
-            for (i in buses.indices) {
-                val mix = mixes.getOrNull(i) ?: continue
+            // Render each bus into the mix, from the snapshot taken for this block.
+            for (i in 0 until snapshot.size) {
+                val mix = snapshot.mixes[i]
                 val gain = if (mix.audible) mix.gain else 0f
-                buses[i].render(mixBuffer, 0, frames, gain, mix.pan)
+                snapshot.buses[i].render(mixBuffer, 0, frames, gain, mix.pan)
             }
             previewBus.render(mixBuffer, 0, frames, previewMix.gain, previewMix.pan)
 
@@ -548,7 +601,7 @@ class AudioEngine {
                 if (region != null && loopEndFrame > loopStartFrame && next >= loopEndFrame) {
                     // Loop back, releasing anything sounding so the seam is clean.
                     next = loopStartFrame
-                    buses.forEach { it.panic() }
+                    snapshot.buses.forEach { it.panic() }
                     synchronized(this) {
                         nextEventIndex = schedule.events.indexOfFirst { it.frame >= next }
                             .let { if (it < 0) schedule.events.size else it }
@@ -570,7 +623,9 @@ class AudioEngine {
     private fun renderScheduled(blockStart: Long, blockEnd: Long, frames: Int) {
         val current = schedule
         val events = current.events
-        var index = nextEventIndex
+        // The schedule can be replaced between blocks, so the cursor is clamped rather
+        // than trusted: a stale index from a longer schedule must not read past the end.
+        var index = nextEventIndex.coerceIn(0, events.size)
         // Skip anything already in the past, which can happen right after a seek.
         while (index < events.size && events[index].frame < blockStart) index++
 
@@ -629,10 +684,10 @@ class AudioEngine {
         }
     }
 
-    private fun busFor(index: Int): InstrumentBus? = when {
-        index == Sequencer.PREVIEW_BUS -> previewBus
-        index in buses.indices -> buses[index]
-        else -> null
+    private fun busFor(index: Int): InstrumentBus? {
+        if (index == Sequencer.PREVIEW_BUS) return previewBus
+        val current = mixer
+        return current.buses.getOrNull(index)
     }
 
     private fun publishPosition(frame: Long, state: TransportState) {

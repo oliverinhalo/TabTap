@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -56,6 +58,7 @@ import kotlin.math.roundToInt
  * the user reaches for constantly. The position readout is in bars and beats rather than
  * seconds, which is the only unit that is useful while composing.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TransportBar(
     isPlaying: Boolean,
@@ -105,28 +108,43 @@ fun TransportBar(
         // second. Hiding the loop button on a phone meant the loop could not be reached
         // at all, which is worse than two rows.
         val oneRow = width >= 560.dp
-        val showBeatLamps = width >= 460.dp
-        val showLoopAndClick = oneRow
-        val showRestart = width >= 380.dp
-        val showUndoRedo = oneRow
+        // The beat lamps are a luxury: they only appear once everything else fits on
+        // one line, because three lines of transport on a 640dp landscape phone costs
+        // more than the lamps are worth.
+        val showBeatLamps = width >= 760.dp
+        // Nothing is dropped for width any more. The loop, the metronome, undo and redo
+        // were hidden below 560dp, which is every phone in portrait and some in
+        // landscape: redo simply did not exist and the loop could not be reached. They
+        // wrap onto a second line instead.
+        val showLoopAndClick = true
+        val showRestart = true
+        val showUndoRedo = true
         // Below this the plus/minus stepper does not fit; the tempo becomes a tappable
         // readout instead, which still reaches tap-tempo and the tempo field.
         val showTempoStepper = width >= 360.dp
-        // Icons alone are a guessing game. Where there is width to spare, every control
-        // carries its name underneath.
-        val showLabels = width >= 700.dp
+        // Icons alone are a guessing game, so each one carries its name underneath -
+        // but only on a screen wide enough to keep the bar one row deep. With labels at
+        // 700dp the bar wrapped to 140dp, a third of the height of a phone in
+        // landscape, which is height the fretboard needs more than the labels do. On a
+        // narrower screen the names are in the page's help instead.
+        val showLabels = width >= 1100.dp
 
         Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Column {
-            Row(
+            // A Row measures its non-weighted children in order and gives whatever is
+            // left — nothing — to the last ones, so when the controls overflowed, undo
+            // was half cut off and redo was measured to zero width and vanished. A
+            // FlowRow wraps instead, so every control is always fully on the screen
+            // whatever the width; on a wide screen it is still a single row.
+            FlowRow(
                 Modifier
                     .fillMaxWidth()
                     .padding(horizontal = spacing.medium, vertical = spacing.small),
-                verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(spacing.tiny),
+                verticalArrangement = Arrangement.spacedBy(spacing.tiny),
             ) {
                 // The play button is the largest target on the bar, deliberately.
                 LabelledControl(
@@ -236,7 +254,7 @@ fun TransportBar(
                 Spacer(Modifier.width(spacing.small))
 
                 // Position, in bars and beats.
-                Column(Modifier.width(if (showUndoRedo) 96.dp else 84.dp)) {
+                Column(Modifier.width(80.dp)) {
                     Text(
                         if (countInBeatsRemaining > 0) {
                             "Count-in $countInBeatsRemaining"
@@ -263,8 +281,6 @@ fun TransportBar(
                         )
                     }
                 }
-
-                Spacer(Modifier.weight(1f))
 
                 if (showTempoStepper) {
                     Stepper(
@@ -297,59 +313,6 @@ fun TransportBar(
                     }
                 }
                 LabelledControl("Help", showLabels) { help?.invoke() }
-            }
-
-            // On a narrow screen the loop, click and undo live on their own row.
-            if (!oneRow) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = spacing.medium, vertical = spacing.tiny),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(spacing.tiny),
-                ) {
-                    Box {
-                        var menuOpen by remember { mutableStateOf(false) }
-                        IconToggle(
-                            Icons.Default.Loop,
-                            if (looping) "Loop: ${loopLabel ?: "on"}" else "Loop",
-                            checked = looping,
-                            onClick = {
-                                if (onChooseLoop == null) onToggleLoop() else menuOpen = true
-                            },
-                        )
-                        if (onChooseLoop != null) {
-                            DropdownMenu(
-                                expanded = menuOpen,
-                                onDismissRequest = { menuOpen = false },
-                            ) {
-                                for (scope in LoopScope.entries) {
-                                    DropdownMenuItem(
-                                        text = { Text(scope.label) },
-                                        onClick = { menuOpen = false; onChooseLoop(scope) },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    IconToggle(
-                        Icons.Default.GraphicEq, "Metronome",
-                        checked = metronomeEnabled,
-                        accent = MusicColors.harmony[0],
-                        onClick = onToggleMetronome,
-                    )
-                    if (looping && loopLabel != null) {
-                        Text(
-                            "loop: $loopLabel",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 1,
-                        )
-                    }
-                    Spacer(Modifier.weight(1f))
-                    IconToggle(Icons.Default.Undo, "Undo", enabled = canUndo, onClick = onUndo)
-                    IconToggle(Icons.Default.Redo, "Redo", enabled = canRedo, onClick = onRedo)
-                }
             }
 
             // A one-pixel save indicator: visible when it matters, invisible otherwise.
