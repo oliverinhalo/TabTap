@@ -33,6 +33,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -127,19 +129,57 @@ fun FretboardView(
         // was above it. Everything below the fretboard was then pushed off the screen and
         // could not be reached at all. Filling the available space instead, down to a
         // floor that is still hittable, is the only arrangement that works in landscape.
-        val availableHeight = maxHeight
+        // An unbounded height - the board placed inside a vertical scroll - would make
+        // the height infinite, and an infinite size cannot be measured or drawn. The
+        // comfortable height is used instead, so the board is usable there too.
+        val availableHeight = if (maxHeight.value.isFinite()) maxHeight else Dp.Unspecified
+        val widthPx = with(density) { maxWidth.toPx() }
         val comfortable: Dp = (stringCount * 44 + 46).dp
         val floor: Dp = (stringCount * 22 + 26).dp
         val height: Dp = when {
+            availableHeight == Dp.Unspecified -> comfortable
             availableHeight.value <= 0f -> comfortable
             availableHeight >= comfortable -> availableHeight
             else -> maxOf(availableHeight, floor)
         }
 
+        val heightPx = with(density) { height.toPx() }
+
+        // The geometry is worked out here, from the size the board has been given, not
+        // inside the draw lambda. Built in the draw, a tap that arrived before the first
+        // frame had been painted found no geometry and did nothing - and nothing in a
+        // test could tap the board at all, because a test need never paint.
+        val geometry = remember(
+            widthPx, heightPx, stringCount, fretboard.fretCount,
+            display.firstVisibleFret, display.visibleFretCount,
+            display.showFretNumbers, display.leftHanded, density,
+        ) {
+            FretboardGeometry(
+                size = Size(widthPx, heightPx),
+                stringCount = stringCount,
+                firstFret = display.firstVisibleFret.coerceIn(
+                    0, max(0, fretboard.fretCount - display.visibleFretCount),
+                ),
+                visibleFrets = display.visibleFretCount.coerceIn(4, fretboard.fretCount),
+                totalFrets = fretboard.fretCount,
+                showFretNumbers = display.showFretNumbers,
+                leftHanded = display.leftHanded,
+                labelWidthPx = with(density) { 30.dp.toPx() },
+                numberHeightPx = with(density) { 20.dp.toPx() },
+                openColumnPx = with(density) { 34.dp.toPx() },
+            )
+        }
+        geometryHolder.value = geometry
+
         Box(
             Modifier
                 .fillMaxWidth()
                 .height(height)
+                // One named node for the board. A screen reader had nothing to announce
+                // here at all, and the board could not be aimed at in a test either.
+                .semantics {
+                    contentDescription = "Fretboard, ${fretboard.stringCount} strings"
+                }
                 .pointerInput(fretboard, display.leftHanded) {
                     // Multi-touch note entry: the first finger down starts a note, and
                     // any finger that arrives while another is still down is treated as
@@ -190,22 +230,7 @@ fun FretboardView(
                 },
         ) {
             androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
-                val g = FretboardGeometry(
-                    size = size,
-                    stringCount = stringCount,
-                    firstFret = display.firstVisibleFret.coerceIn(
-                        0, max(0, fretboard.fretCount - display.visibleFretCount),
-                    ),
-                    visibleFrets = display.visibleFretCount.coerceIn(4, fretboard.fretCount),
-                    totalFrets = fretboard.fretCount,
-                    showFretNumbers = display.showFretNumbers,
-                    leftHanded = display.leftHanded,
-                    labelWidthPx = with(density) { 30.dp.toPx() },
-                    numberHeightPx = with(density) { 20.dp.toPx() },
-                    openColumnPx = with(density) { 34.dp.toPx() },
-                )
-                geometryHolder.value = g
-                drawFretboard(g, fretboard, key, marks, display, sounding, measurer)
+                drawFretboard(geometry, fretboard, key, marks, display, sounding, measurer)
             }
         }
     }

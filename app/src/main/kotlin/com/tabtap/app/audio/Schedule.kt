@@ -120,10 +120,22 @@ object Sequencer {
         metronome: Boolean = false,
         metronomeLevel: Float = 0.7f,
         includeChords: Boolean = true,
+        /**
+         * Keep the schedule running to at least this tick, whatever the music is.
+         *
+         * Tapping a rhythm plays no tracks - the notes are sounded by the taps - so the
+         * music's own end is tick zero and the click track was one bar long. Playback
+         * then ended after that bar, the playhead stopped advancing, and every later tap
+         * recorded the same tick, which piled the whole phrase onto beat one of bar one.
+         */
+        minimumEndTick: Long = 0L,
     ): Schedule {
         val tempoMap = composition.tempoMap
         val ts = composition.timeSignature
-        val endTick = toTick ?: maxOf(composition.endTick, ts.barTicks.toLong())
+        val endTick = maxOf(
+            toTick ?: maxOf(composition.endTick, ts.barTicks.toLong()),
+            minimumEndTick,
+        )
 
         val countInTicks = countInBars.toLong() * ts.barTicks
         val countInFrames = if (countInBars > 0) {

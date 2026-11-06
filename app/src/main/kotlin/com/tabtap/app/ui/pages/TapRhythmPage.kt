@@ -24,6 +24,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.tabtap.app.StudioUiState
 import com.tabtap.app.StudioViewModel
@@ -118,7 +120,8 @@ fun TapRhythmPage(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
                             onClick = model::recordRhythmTap,
-                        ),
+                        )
+                        .semantics { contentDescription = "Tap pad" },
                     contentAlignment = Alignment.Center,
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {

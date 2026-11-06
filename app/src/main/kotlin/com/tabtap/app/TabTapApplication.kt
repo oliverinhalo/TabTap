@@ -16,6 +16,12 @@ import com.tabtap.app.data.TabTapDatabase
  */
 class TabTapApplication : Application() {
 
+    override fun onCreate() {
+        super.onCreate()
+        // Installed first, so a fault anywhere after this point is recorded.
+        CrashReporter.install(this)
+    }
+
     /** The one audio engine for the process. Opened lazily on first playback. */
     val audioEngine: AudioEngine by lazy { AudioEngine() }
 

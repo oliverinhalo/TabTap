@@ -102,6 +102,17 @@ data class RhythmRecording(
      * so this is both the cursor through the sequence and the count of taps.
      */
     val noteCursor: Int = 0,
+    /**
+     * When the recording started, on the device's monotonic clock, and how long its
+     * count-in lasts.
+     *
+     * Taps are timed against the transport, which shares the audio thread's frame clock
+     * with the click you are tapping to - that is the only way the two cannot drift. But
+     * a transport that is not advancing gives every tap the same tick, so these let a
+     * tap still be placed when that happens.
+     */
+    val startedAtMs: Long = 0L,
+    val countInMs: Long = 0L,
 ) {
     val tapCount: Int get() = onsets.size
 }
@@ -160,6 +171,8 @@ data class StudioUiState(
     val entryValue: NoteValue = NoteValue.QUARTER,
     val quantize: Quantize = CompositionEditor.DEFAULT_QUANTIZE,
     val metronomeEnabled: Boolean = false,
+    /** The metronome setting to put back when a rhythm recording ends. */
+    val metronomeWasEnabled: Boolean = false,
     val metronomeLevel: Float = 0.7f,
     val countInBars: Int = 1,
     val loop: LoopRegion? = null,
@@ -985,21 +998,72 @@ class StudioViewModel(
      * quantised only when the recording is committed, so the quantise setting can be
      * changed after the fact without losing the performance.
      */
+    /**
+     * The device's clock, overridable in tests.
+     *
+     * Monotonic in the sense that matters here: it is not the transport, so it keeps
+     * moving when playback does not.
+     */
+    internal var clockMs: () -> Long = { System.currentTimeMillis() }
+
     fun startRhythmRecording() {
         val state = _state.value
         if ((state.activeTrack?.notes?.size ?: 0) == 0) {
             emit("Play some notes in first, then tap their rhythm")
             return
         }
-        _state.value = state.copy(recording = RhythmRecording(isRecording = true))
+        val bar = state.composition.timeSignature.barTicks.toLong()
+        val countInMs = (Ticks.toSeconds(state.countInBars * bar, state.composition.bpm) * 1000)
+            .toLong()
+        _state.value = state.copy(
+            // The metronome is switched on for you. Tapping a rhythm to no click is
+            // tapping to nothing, so leaving it to a setting elsewhere is no help; the
+            // previous setting is put back when the recording ends.
+            metronomeEnabled = true,
+            metronomeWasEnabled = state.metronomeEnabled,
+            recording = RhythmRecording(
+                isRecording = true,
+                startedAtMs = clockMs(),
+                countInMs = countInMs,
+            ),
+        )
         // The metronome runs on its own: the notes are sounded by your taps, so playing
         // the track as well would mean hearing the old rhythm over the new one.
+        //
+        // It has to keep clicking for as long as someone might tap, which the music's
+        // own length cannot say, because while tapping there is no music.
         playInternal(
             fromTick = 0L,
             metronome = true,
             countInBars = state.countInBars,
             includeTracks = false,
+            minimumEndTick = RECORDING_BARS * bar,
         )
+    }
+
+    /**
+     * Where a tap falls, in ticks.
+     *
+     * The transport is the right clock: it is the one the click is on. When it is not
+     * advancing - playback over, or never started - the device clock is used instead,
+     * because reading a frozen playhead gives every tap the same tick and collapses the
+     * whole phrase onto one beat.
+     */
+    private fun recordingTick(state: StudioUiState): Long? {
+        // A tap during the count-in is not part of the rhythm. Recording it at tick zero
+        // would put it on beat one along with every other early tap.
+        if (state.playback.countInBeatsRemaining > 0) return null
+
+        val transport = state.playback.tick
+        if (state.isPlaying && (transport > 0L || state.recording.onsets.isEmpty())) {
+            return transport
+        }
+        val startedAt = state.recording.startedAtMs
+        if (startedAt == 0L) return transport
+        val sinceStart = clockMs() - startedAt
+        if (sinceStart < state.recording.countInMs) return null
+        val elapsed = sinceStart - state.recording.countInMs
+        return Ticks.fromSeconds(elapsed / 1000.0, state.composition.bpm)
     }
 
     /**
@@ -1013,7 +1077,11 @@ class StudioViewModel(
     fun recordRhythmTap() {
         val state = _state.value
         if (!state.recording.isRecording) return
-        val tick = state.playback.tick
+        val tick = recordingTick(state) ?: run {
+            // Still counting in: click so the tap is felt, but do not record it.
+            engine.previewClick(accented = false)
+            return
+        }
         val stacks = noteStacks(state)
         val cursor = state.recording.noteCursor
 
@@ -1065,7 +1133,10 @@ class StudioViewModel(
     }
 
     fun cancelRhythmRecording() {
-        _state.value = _state.value.copy(recording = RhythmRecording())
+        _state.value = _state.value.copy(
+            recording = RhythmRecording(),
+            metronomeEnabled = _state.value.metronomeWasEnabled,
+        )
         stop()
     }
 
@@ -1080,7 +1151,10 @@ class StudioViewModel(
         val trackId = state.activeTrackId ?: return
         val onsets = state.recording.onsets
         stop()
-        _state.value = _state.value.copy(recording = RhythmRecording())
+        _state.value = _state.value.copy(
+            recording = RhythmRecording(),
+            metronomeEnabled = _state.value.metronomeWasEnabled,
+        )
         if (onsets.isEmpty()) {
             emit("No taps were recorded")
             return
@@ -1632,6 +1706,7 @@ class StudioViewModel(
         metronome: Boolean,
         countInBars: Int,
         includeTracks: Boolean,
+        minimumEndTick: Long = 0L,
     ) {
         val state = _state.value
         engine.prepare(state.composition)
@@ -1652,6 +1727,7 @@ class StudioViewModel(
             metronome = metronome,
             metronomeLevel = state.metronomeLevel,
             includeChords = !state.chordsMuted,
+            minimumEndTick = minimumEndTick,
         )
         engine.play(schedule, state.loop)
         PlaybackServiceController.start(getApplication())
@@ -1807,6 +1883,15 @@ class StudioViewModel(
 
     companion object {
         private const val AUTOSAVE_DEBOUNCE_MS = 500L
+
+        /**
+         * How long the click runs while a rhythm is being tapped.
+         *
+         * Long enough that nobody taps past the end of it - at 120 BPM in 4/4 this is
+         * four minutes - and the recording is ended by committing or cancelling, not by
+         * the schedule running out.
+         */
+        internal const val RECORDING_BARS = 128L
     }
 }
 

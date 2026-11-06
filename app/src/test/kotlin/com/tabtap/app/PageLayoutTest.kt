@@ -16,6 +16,10 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -267,6 +271,40 @@ class PageLayoutTest {
                 deepest <= allowed,
             )
         }
+    }
+
+
+    @Test fun theFretboardIsTappableBeforeItHasBeenDrawnAndInsideAScroll() {
+        var tapped: Pair<Int, Int>? = null
+        compose.setContent {
+            TabTapTheme {
+                // A vertical scroll gives its content an unbounded height. An infinite
+                // size cannot be measured or drawn, so the board has to cope with it.
+                Column(
+                    Modifier
+                        .size(892.dp, 412.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    FretboardView(
+                        fretboard = Fretboard(Tunings.STANDARD_E, 22),
+                        key = Key.C_MAJOR,
+                        marks = emptyList<FretboardMark>(),
+                        display = com.tabtap.app.FretboardDisplay(),
+                        sounding = emptySet(),
+                        onTap = { string, fret, _ -> tapped = string to fret },
+                        onWindowChange = { _, _ -> },
+                    )
+                }
+            }
+        }
+        compose.waitForIdle()
+
+        // The geometry is computed from the size the board is given, not in the draw, so
+        // a tap lands even on the very first frame.
+        compose.onNodeWithContentDescription("Fretboard", substring = true)
+            .performTouchInput { click() }
+        compose.waitForIdle()
+        assertTrue("a tap on the board did nothing", tapped != null)
     }
 
     // ---------------------------------------------------------------- the pages

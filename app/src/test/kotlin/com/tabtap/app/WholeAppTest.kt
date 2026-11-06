@@ -1,6 +1,7 @@
 package com.tabtap.app
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -8,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tabtap.app.ui.pages.Page
 import org.junit.Assert.assertTrue
@@ -202,5 +204,90 @@ class WholeAppTest {
             tapText("Close")
             compose.waitForIdle()
         }
+    }
+
+    /**
+     * A project with notes in it, through every page.
+     *
+     * Everything above walks an empty project, which never draws a note, a tab stack, a
+     * notehead or a piano-roll bar - so none of the drawing code was being exercised
+     * through the real app at all. This taps notes onto the real fretboard first.
+     */
+    @Test fun aProjectWithNotesInItSurvivesEveryPage() {
+        compose.waitForIdle()
+        newProject()
+
+        // Tap notes onto the board, spread across it, as a player would.
+        val board = compose.onAllNodesWithContentDescription(
+            "Fretboard", substring = true,
+        ).fetchSemanticsNodes()
+        assertTrue("the fretboard is not on the Play page", board.isNotEmpty())
+        for (fraction in listOf(0.2f, 0.35f, 0.5f, 0.65f, 0.8f)) {
+            compose.onAllNodesWithContentDescription("Fretboard", substring = true)[0]
+                .performTouchInput {
+                    click(
+                        androidx.compose.ui.geometry.Offset(
+                            width * fraction,
+                            height * 0.4f,
+                        ),
+                    )
+                }
+            compose.waitForIdle()
+        }
+
+        // Those taps have to have become notes.
+        assertTrue(goTo(Page.HARMONY))
+        assertTrue(
+            "tapping the fretboard added no notes",
+            exists("Harmonise these"),
+        )
+
+        // Harmonise, so the later pages have more than one part to draw.
+        assertTrue(tapText("Harmonise these 5 notes") || tapText("Harmonise"))
+        compose.waitForIdle()
+
+        // Then every page, with real music in it.
+        for (page in Page.entries) {
+            assertTrue("could not reach ${page.name} with notes", goTo(page))
+        }
+
+        // And undo all of it, which walks the edit stack back through every change.
+        repeat(8) {
+            val undo = compose.onAllNodesWithContentDescription("Undo").fetchSemanticsNodes()
+            if (undo.isEmpty()) return@repeat
+            compose.onAllNodesWithContentDescription("Undo")[0].performClick()
+            compose.waitForIdle()
+        }
+    }
+
+    /** Tapping a rhythm out, through the real pad. */
+    @Test fun theRhythmPadRecordsAndApplies() {
+        compose.waitForIdle()
+        newProject()
+
+        for (fraction in listOf(0.3f, 0.5f, 0.7f)) {
+            compose.onAllNodesWithContentDescription("Fretboard", substring = true)[0]
+                .performTouchInput {
+                    click(androidx.compose.ui.geometry.Offset(width * fraction, height * 0.4f))
+                }
+            compose.waitForIdle()
+        }
+
+        assertTrue(goTo(Page.TAP))
+        assertTrue("no start button on the Tap page", tapText("Start tapping"))
+        val pad = compose.onAllNodesWithContentDescription("Tap pad").fetchSemanticsNodes()
+        assertTrue("the pad did not appear once recording started", pad.isNotEmpty())
+        repeat(3) {
+            compose.onAllNodesWithContentDescription("Tap pad")[0].performClick()
+            compose.waitForIdle()
+        }
+        // Applying must not throw, whatever was or was not recorded.
+        if (exists("Apply the rhythm")) {
+            assertTrue(tapText("Apply the rhythm"))
+            compose.waitForIdle()
+        }
+        // And the tab still draws afterwards.
+        assertTrue(goTo(Page.TAB))
+        assertTrue(exists("part"))
     }
 }

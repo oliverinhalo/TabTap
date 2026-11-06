@@ -43,6 +43,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.tabtap.app.CrashReporter
+import androidx.compose.ui.platform.LocalContext
 import com.tabtap.app.StudioViewModel
 import com.tabtap.app.data.ProjectSummary
 import com.tabtap.app.design.LocalSpacing
@@ -107,6 +109,7 @@ fun ProjectsScreen(
 
     Box(modifier.fillMaxSize()) {
       Column(Modifier.fillMaxSize()) {
+        CrashBanner()
         Row(
             Modifier
                 .fillMaxWidth()
@@ -512,5 +515,61 @@ private fun relativeTime(millis: Long): String {
         days == 1L -> "yesterday"
         days < 7 -> "$days days ago"
         else -> DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(millis))
+    }
+}
+
+/**
+ * Shown once, after a crash.
+ *
+ * "It still crashes" cannot be fixed; a stack trace can. The report is written to the
+ * app's own storage by [CrashReporter] - nothing is sent anywhere, the app has no network
+ * permission at all - and this offers to share it so it can actually be read. Dismissing
+ * deletes it.
+ */
+@Composable
+private fun CrashBanner() {
+    val context = LocalContext.current
+    val spacing = LocalSpacing.current
+    var report by remember { mutableStateOf(CrashReporter.lastReport(context)) }
+    val text = report ?: return
+
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        modifier = Modifier.fillMaxWidth().padding(spacing.small),
+        shape = RoundedCornerShape(10.dp),
+    ) {
+        Column(Modifier.padding(spacing.medium)) {
+            Text(
+                "TabTap stopped unexpectedly last time",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Spacer(Modifier.height(spacing.tiny))
+            Text(
+                CrashReporter.summarise(text),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(spacing.small))
+            Row(horizontalArrangement = Arrangement.spacedBy(spacing.small)) {
+                Button(onClick = {
+                    val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+                        .setType("text/plain")
+                        .putExtra(android.content.Intent.EXTRA_SUBJECT, "TabTap crash report")
+                        .putExtra(android.content.Intent.EXTRA_TEXT, text)
+                    runCatching {
+                        context.startActivity(
+                            android.content.Intent.createChooser(send, "Send the crash report"),
+                        )
+                    }
+                }) { Text("Send the report") }
+                TextButton(onClick = {
+                    CrashReporter.clear(context)
+                    report = null
+                }) { Text("Dismiss") }
+            }
+        }
     }
 }
