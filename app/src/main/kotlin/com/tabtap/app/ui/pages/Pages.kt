@@ -2,6 +2,7 @@ package com.tabtap.app.ui.pages
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.IosShare
@@ -36,17 +37,29 @@ enum class Page(
     val showTransport: Boolean,
     /** Whether the page needs an open project. */
     val needsProject: Boolean = true,
+    /**
+     * Where this page sits in the order of work, shown as a number in the rail.
+     *
+     * The app does not force an order, but there is one that makes sense - notes, then
+     * rhythm, then harmony, then reading and exporting it - and a player has no way to
+     * guess it from nine icons. Pages that are not a step in that sequence have none.
+     */
+    val step: Int? = null,
 ) {
     PROJECTS("Projects", "Files", Icons.Default.FolderOpen, "projects", false, needsProject = false),
-    PLAY("Play the notes in", "Play", Icons.Default.MusicNote, "fretboard", true),
-    NOTES("Notes and rhythm", "Notes", Icons.AutoMirrored.Filled.QueueMusic, "rhythm", true),
-    TAP("Tap the rhythm", "Tap", Icons.Default.TouchApp, "tap", true),
-    HARMONY("Harmony", "Harmony", Icons.Default.Tune, "harmony", true),
-    CHORDS("Chords", "Chords", Icons.Default.Piano, "chords", true),
-    TAB("Tab", "Tab", Icons.Default.GridOn, "tab", true),
-    SCORE("Score", "Score", Icons.Default.LibraryMusic, "score", true),
+    PLAY("Play the notes in", "Play", Icons.Default.MusicNote, "fretboard", true, step = 1),
+    NOTES(
+        "Notes and rhythm", "Notes", Icons.AutoMirrored.Filled.QueueMusic, "rhythm", true,
+        step = 2,
+    ),
+    TAP("Tap the rhythm", "Tap", Icons.Default.TouchApp, "tap", true, step = 3),
+    HARMONY("Harmony", "Harmony", Icons.Default.Tune, "harmony", true, step = 4),
+    CHORDS("Chords", "Chords", Icons.Default.Piano, "chords", true, step = 5),
+    TAB("Tab", "Tab", Icons.Default.GridOn, "tab", true, step = 6),
+    SCORE("Score", "Score", Icons.Default.LibraryMusic, "score", true, step = 7),
+    ROLL("Piano roll", "Roll", Icons.Default.Album, "pianoroll", true),
     SETUP("Instrument and key", "Setup", Icons.Default.Settings, "instrument", true),
-    EXPORT("Export", "Export", Icons.Default.IosShare, "export", true),
+    EXPORT("Export", "Export", Icons.Default.IosShare, "export", true, step = 8),
     ;
 
     companion object {

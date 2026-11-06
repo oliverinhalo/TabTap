@@ -7,6 +7,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tabtap.app.ui.pages.Page
 import org.junit.Assert.assertTrue
@@ -63,7 +64,11 @@ class WholeAppTest {
             .onAllNodesWithContentDescription("Go to ${page.title}")
             .fetchSemanticsNodes()
         if (nodes.isEmpty()) return false
-        compose.onAllNodesWithContentDescription("Go to ${page.title}")[0].performClick()
+        // The strip scrolls, so a destination can be composed but outside the viewport;
+        // clicking it then lands somewhere else entirely.
+        compose.onAllNodesWithContentDescription("Go to ${page.title}")[0]
+            .performScrollTo()
+            .performClick()
         compose.waitForIdle()
         return true
     }
@@ -103,8 +108,31 @@ class WholeAppTest {
 
         // Now walk every page by its label in the navigation strip. A page that throws
         // on composition fails the test here, which is what was being missed.
+        // Every page must actually draw something of its own. A page left out of the
+        // shell's `when` renders nothing at all, which is how the piano roll quietly
+        // disappeared when the studio was split into pages: it was still in the
+        // navigation but the screen was blank.
+        val fingerprint = mapOf(
+            Page.PROJECTS to "Projects",
+            Page.PLAY to "Tap the fretboard",
+            Page.NOTES to "Note",
+            Page.TAP to "Tap",
+            Page.HARMONY to "Play some notes first",
+            Page.CHORDS to "Chord",
+            Page.TAB to "part",
+            Page.SCORE to "SHEET MUSIC",
+            Page.ROLL to "Drag a note",
+            Page.SETUP to "Instrument",
+            Page.EXPORT to "Export",
+        )
         for (page in Page.entries) {
             assertTrue("could not reach ${page.name}", goTo(page))
+            val expected = fingerprint[page]
+            assertTrue("no fingerprint for ${page.name} in the test", expected != null)
+            assertTrue(
+                "${page.name} drew nothing of its own (looked for \"$expected\")",
+                exists(expected!!),
+            )
         }
     }
 

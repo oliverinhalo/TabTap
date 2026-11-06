@@ -42,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -63,6 +64,7 @@ import com.tabtap.app.ui.help.HelpButton
 import com.tabtap.app.ui.pages.HarmonyPage
 import com.tabtap.app.ui.pages.NotesPage
 import com.tabtap.app.ui.pages.Page
+import com.tabtap.app.ui.pages.RollPage
 import com.tabtap.app.ui.pages.PlayPage
 import com.tabtap.app.ui.pages.ScorePage
 import com.tabtap.app.ui.pages.SetupPage
@@ -254,6 +256,7 @@ fun TabTapApp(
                             page == Page.CHORDS -> ChordsScreen(model, state)
                             page == Page.TAB -> TabPage(model, state)
                             page == Page.SCORE -> ScorePage(model, state)
+                            page == Page.ROLL -> RollPage(model, state)
                             page == Page.SETUP -> SetupPage(model, state)
                             page == Page.EXPORT -> ExportScreen(model, state)
                         }
@@ -272,6 +275,10 @@ fun TabTapApp(
  * every page is always reachable whatever the screen size — which was the bug that made
  * the controls under the fretboard unreachable in the first place.
  */
+/** One destination's size in the strip, which the auto-scroll also works from. */
+private val ITEM_WIDTH = 68.dp
+private val ITEM_HEIGHT = 46.dp
+
 @Composable
 private fun PageStrip(
     current: Page,
@@ -281,6 +288,20 @@ private fun PageStrip(
 ) {
     val spacing = LocalSpacing.current
     val scroll = rememberScrollState()
+    val density = LocalDensity.current
+
+    // With eleven destinations the strip is longer than a phone's screen, so the last
+    // few sit outside it. Scrolling the current one into view means a page you have just
+    // opened - and its neighbours - are always visible, instead of the strip staying at
+    // the top with the page you are on hidden off the end.
+    val index = Page.entries.indexOf(current)
+    LaunchedEffect(current, scroll.maxValue) {
+        if (scroll.maxValue > 0) {
+            val extent = with(density) { if (vertical) ITEM_HEIGHT.toPx() else ITEM_WIDTH.toPx() }
+            val target = (index * extent - extent).toInt().coerceIn(0, scroll.maxValue)
+            scroll.animateScrollTo(target)
+        }
+    }
 
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
         if (vertical) {
@@ -340,8 +361,8 @@ private fun PageButton(
     }
     Column(
         Modifier
-            .width(68.dp)
-            .padding(2.dp)
+            .width(ITEM_WIDTH)
+            .padding(horizontal = 2.dp, vertical = 1.dp)
             .background(
                 if (selected) {
                     MaterialTheme.colorScheme.surfaceContainerHighest
@@ -359,13 +380,13 @@ private fun PageButton(
                 role = Role.Tab
                 this.selected = isSelected
             }
-            .padding(vertical = 6.dp),
+            .padding(vertical = 5.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(page.icon, page.title, tint = tint, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.height(2.dp))
+        Icon(page.icon, page.title, tint = tint, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.height(1.dp))
         Text(
-            page.shortTitle,
+            page.step?.let { "$it. ${page.shortTitle}" } ?: page.shortTitle,
             style = MaterialTheme.typography.labelSmall,
             color = tint,
             maxLines = 1,

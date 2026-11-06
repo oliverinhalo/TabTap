@@ -728,6 +728,30 @@ class StudioViewModel(
         }
     }
 
+    /**
+     * Move a note in pitch and time at once, as one drag in the piano roll does.
+     *
+     * Transposing and moving are separate edits elsewhere; doing both here as one edit
+     * means a single drag is a single undo.
+     */
+    fun moveNoteInPitchAndTime(noteId: Long, semitones: Int, deltaTicks: Long) {
+        val trackId = _state.value.activeTrackId ?: return
+        val note = _state.value.activeTrack?.notes?.firstOrNull { it.id == noteId } ?: return
+        if (semitones == 0 && deltaTicks == 0L) return
+        edit("Move note", coalesceKey = "roll-$noteId") {
+            var next = it
+            if (semitones != 0) {
+                next = CompositionEditor.transposeNote(next, trackId, noteId, semitones)
+            }
+            if (deltaTicks != 0L) {
+                next = CompositionEditor.setNoteStart(
+                    next, trackId, noteId, (note.startTick + deltaTicks).coerceAtLeast(0L),
+                )
+            }
+            next
+        }
+    }
+
     fun setNoteStart(noteId: Long, startTick: Long) {
         val trackId = _state.value.activeTrackId ?: return
         edit("Move note", coalesceKey = "start-$noteId") {

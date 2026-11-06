@@ -36,6 +36,7 @@ import com.tabtap.app.ui.panels.DisplayPanel
 import com.tabtap.app.ui.panels.InstrumentPanel
 import com.tabtap.app.ui.panels.KeyScalePanel
 import com.tabtap.app.ui.panels.RhythmPanel
+import com.tabtap.app.ui.panes.PianoRollPane
 import com.tabtap.app.ui.panes.ScorePane
 import com.tabtap.app.ui.panes.TabPane
 
@@ -299,5 +300,60 @@ fun SetupPage(
         }
         DisplayPanel(display = state.display, onChange = model::setDisplay)
         Spacer(Modifier.height(spacing.xxLarge))
+    }
+}
+
+/**
+ * The piano-roll page: pitch against time.
+ *
+ * The roll is the view that makes a line's shape and its rhythm obvious at once, and it
+ * is the only one where a note can be dragged in pitch and in time together. It had
+ * become unreachable when the studio was split into pages, which quietly removed an
+ * editor the app is supposed to have.
+ */
+@Composable
+fun RollPage(
+    model: StudioViewModel,
+    state: StudioUiState,
+    modifier: Modifier = Modifier,
+) {
+    val active = state.activeTrack ?: return
+
+    Column(modifier.fillMaxSize()) {
+        ZoomRow(
+            label = active.name,
+            scale = state.notationScale,
+            onScale = model::setNotationScale,
+        )
+        HairlineDivider()
+        Text(
+            if (active.notes.isEmpty()) {
+                "Tap in the grid to put a note there. Drag a note to move it, drag its " +
+                    "right edge to change its length."
+            } else {
+                "Drag a note to move it in pitch and time; drag its right edge for its " +
+                    "length. The fret follows the pitch."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = LocalTabTapColors.current.textTertiary,
+            modifier = Modifier.padding(horizontal = LocalSpacing.current.small),
+        )
+        PianoRollPane(
+            composition = state.composition,
+            track = active,
+            selectedNoteIds = state.selectedNoteIds,
+            playheadTick = if (state.isPlaying) state.playback.tick else null,
+            pixelsPerQuarter = 48f * state.notationScale,
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            onSelectNote = { id, additive ->
+                if (additive) model.toggleSelection(id) else model.setSelection(setOf(id))
+            },
+            onMoveNote = model::moveNoteInPitchAndTime,
+            onResizeNote = model::setNoteDuration,
+            onAddNote = { pitch, startTick ->
+                model.addNoteByPitch(pitch, startTick, state.entryValue.ticks)
+            },
+            onSeek = model::seekTo,
+        )
     }
 }
